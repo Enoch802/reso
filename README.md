@@ -44,4 +44,4 @@ Push to GitHub and import the repo in Vercel. Add any of the environment variabl
 
 ## Packaging as an Android app
 
-`capacitor/README.md` walks through wrapping this app with Capacitor, registering the native plugins (screen time + alarms), and the manifest entries. The Kotlin sources are ready in `capacitor/android/`.
+`capacitor/README.md` documents the generated Android wrapper. It loads `https://reso-pnjj.vercel.app` in the WebView, so the live Next.js API routes continue to work; it does not perform a static export.

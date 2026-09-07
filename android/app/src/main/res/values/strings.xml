@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Reso</string>
+    <string name="title_activity_main">Reso</string>
+    <string name="package_name">com.reso.app</string>
+    <string name="custom_url_scheme">com.reso.app</string>
+</resources>

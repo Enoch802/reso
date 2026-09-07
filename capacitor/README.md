@@ -1,4 +1,28 @@
-# Screen Time — Capacitor Android bridge
+# Reso Android wrapper
+
+The Android project in `../android/` is configured with app id `com.reso.app`, app name `Reso`, and `server.url = https://reso-pnjj.vercel.app`. The native shell loads the live Vercel deployment, not a static export, so AI, Gmail OAuth, digest, and timetable API routes remain available.
+
+## Open and build in Android Studio
+
+1. Install Android Studio with an Android SDK and emulator or connect a USB-debugging-enabled device.
+2. Open the repository's `android/` directory in Android Studio.
+3. Let Gradle sync finish, then choose an emulator or connected device.
+4. Run the `app` configuration to test the WebView wrapper.
+5. Build an APK from **Build > Build Bundle(s) / APK(s) > Build APK(s)**, or generate a signed release from **Build > Generate Signed Bundle / APK**.
+
+Before testing native features, grant **Usage access** to Reso in Android Settings when prompted by Screen Time tracking. Exact alarm delivery may require enabling Reso under **Alarms & reminders** on Android versions that expose that permission.
+
+The app icon uses the existing Reso favicon-derived mark in adaptive launcher resources at `android/app/src/main/res/mipmap-*`; the Play Store-sized source is `capacitor/icons/play-store-icon.png`.
+
+## Generated project maintenance
+
+After changing Capacitor packages or native plugins, run `npx cap sync android` from the repository root. Do not run `next export` or point the wrapper at `.next`: the native app is intentionally configured to use the live Vercel URL.
+
+## Native plugin registration
+
+`MainActivity` registers `AlarmPlugin` and `ScreenTimePlugin`. The manifest declares internet, exact-alarm, vibration, boot, and usage-access permissions, and registers alarm and boot receivers. Alarm schedules persist in native preferences and are restored after reboot.
+
+## Screen Time — Capacitor Android bridge
 
 Screen time syncing reads Android's `UsageStatsManager` and stores the previous
 day's total (minutes) into the local `daily_logs` table. Nothing is sent to any
