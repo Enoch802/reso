@@ -65,7 +65,9 @@ export default function FinancePage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <NeoButton onClick={() => setShowAdjust(true)} className="font-semibold">Add funds</NeoButton>
+          <NeoButton onClick={() => setShowAdjust(true)} className="font-semibold">
+            <span className="inline-flex items-center gap-2"><Plus size={16} aria-hidden /> Add funds</span>
+          </NeoButton>
           <NeoButton variant="accent" onClick={() => setShowAdd(true)} className="font-semibold">
             <span className="inline-flex items-center gap-2"><Plus size={16} aria-hidden /> Add expense</span>
           </NeoButton>
