@@ -118,6 +118,14 @@ export interface Expense {
   note: string;
 }
 
+export interface FinanceIncome {
+  id?: number;
+  finance_week_id: number;
+  date: string;
+  amount: number;
+  note: string;
+}
+
 export interface Routine {
   id?: number;
   name: string;
@@ -255,6 +263,7 @@ class ResoDB extends Dexie {
   finance_settings!: Table<FinanceSettings, number>;
   finance_weeks!: Table<FinanceWeek, number>;
   expenses!: Table<Expense, number>;
+  finance_income!: Table<FinanceIncome, number>;
   routines!: Table<Routine, number>;
   routine_logs!: Table<RoutineLog, number>;
   daily_plan_items!: Table<DailyPlanItem, number>;
@@ -285,6 +294,7 @@ class ResoDB extends Dexie {
       finance_settings: "++id",
       finance_weeks: "++id, week_start_date",
       expenses: "++id, finance_week_id, date, tag",
+      finance_income: "++id, finance_week_id, date",
       routines: "++id",
       routine_logs: "++id, routine_id, date",
       daily_plan_items: "++id, date, checked",
@@ -306,6 +316,9 @@ class ResoDB extends Dexie {
     });
     this.version(4).stores({
       course_chats: "++id, course_id, ts",
+    });
+    this.version(5).stores({
+      finance_income: "++id, finance_week_id, date",
     });
   }
 }
@@ -331,7 +344,7 @@ export async function exportAllData(): Promise<string> {
   const tables = [
     "profile", "courses", "course_ca_components", "course_scores",
     "course_topics", "timetable_slots", "exams", "personal_study_slots",
-    "finance_settings", "finance_weeks", "expenses", "routines",
+    "finance_settings", "finance_weeks", "expenses", "finance_income", "routines",
     "routine_logs", "daily_plan_items", "daily_logs", "chat_messages",
     "discipline_scores", "weekly_digests", "email_accounts", "email_items",
     "archived_semesters",

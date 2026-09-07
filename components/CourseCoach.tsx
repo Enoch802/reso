@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Send, Loader2 } from "lucide-react";
+import { Send } from "lucide-react";
 import { db } from "@/lib/db";
 import { NeoButton } from "./ui";
 import { useToday } from "./AppShell";
@@ -90,8 +90,7 @@ export function CoachChat({ courseId }: { courseId: number }) {
         {busy && (
           <div className="flex justify-start">
             <div className="neo rounded-2xl px-4 py-2.5 flex items-center gap-2 animate-pulse-soft">
-              <Loader2 size={14} className="animate-spin text-[var(--accent)]" aria-hidden />
-              <span className="text-sm text-[var(--ink-soft)]">Thinking about your course…</span>
+              <span className="tdots" aria-label="Reso is typing"><i /><i /><i /></span>
             </div>
           </div>
         )}

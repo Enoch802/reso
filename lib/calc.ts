@@ -1,6 +1,6 @@
 import {
   Course, CourseCaComponent, CourseScore, DailyPlanItem, Routine, RoutineLog,
-  Expense, FinanceSettings, FinanceWeek, DailyLog,
+  Expense, FinanceSettings, FinanceWeek, DailyLog, FinanceIncome,
 } from "./db";
 import { addDays, daysBetween, todayStr, weekStartOnOrBefore } from "./dates";
 
@@ -90,6 +90,10 @@ export function weekBalance(week: FinanceWeek, expenses: Expense[]) {
     spent,
     balance: week.opening_balance - spent,
   };
+}
+
+export function weekIncome(week: FinanceWeek, income: FinanceIncome[]) {
+  return income.filter((entry) => entry.finance_week_id === week.id).reduce((a, entry) => a + entry.amount, 0);
 }
 
 export function daySpendClass(dayExpenses: Expense[], target: number): "overspent" | "underspent" | "on target" {

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Mic, Send, History, Loader2, X } from "lucide-react";
+import { Mic, Send, History, X } from "lucide-react";
 import { db } from "@/lib/db";
 import type { DailyLog } from "@/lib/db";
 import { GlassCard, EmptyState, Modal, NeoButton, Tag } from "@/components/ui";
@@ -225,8 +225,7 @@ export default function JournalPage() {
           {busy && (
             <div className="flex justify-start">
               <div className="neo rounded-2xl rounded-bl-md px-5 py-3.5 flex items-center gap-2 animate-pulse-soft">
-                <Loader2 size={15} className="animate-spin text-[var(--accent)]" aria-hidden />
-                <span className="text-sm text-[var(--ink-soft)]">Reso is listening…</span>
+                <span className="tdots" aria-label="Reso is typing"><i /><i /><i /></span>
               </div>
             </div>
           )}

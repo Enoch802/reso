@@ -5,7 +5,7 @@ import { Wallet2, Plus, TrendingDown, PiggyBank, ReceiptText } from "lucide-reac
 import { db, Expense } from "@/lib/db";
 import { GlassCard, SectionHeader, Field, NeoButton, Tag, EmptyState, Modal } from "@/components/ui";
 import { useToday } from "@/components/AppShell";
-import { daySpendClass, weekBalance } from "@/lib/calc";
+import { daySpendClass, weekBalance, weekIncome } from "@/lib/calc";
 import { fmtMoney, prettyDate, weekStartOnOrBefore, todayStr, DAY_SHORT } from "@/lib/dates";
 
 export default function FinancePage() {
@@ -16,6 +16,7 @@ export default function FinancePage() {
   const fs = useLiveQuery(() => db.finance_settings.toArray(), []);
   const weeks = useLiveQuery(() => db.finance_weeks.toArray(), []);
   const expenses = useLiveQuery(() => db.expenses.toArray(), []);
+  const income = useLiveQuery(() => db.finance_income.toArray(), []);
 
   const settings = fs?.[0];
 
@@ -30,6 +31,8 @@ export default function FinancePage() {
     [expenses, week]
   );
   const bal = week ? weekBalance(week, expenses ?? []) : null;
+  const extraIncome = week ? weekIncome(week, income ?? []) : 0;
+  const balance = bal ? { ...bal, balance: bal.balance + extraIncome } : null;
 
   const wants = weekExpenses.filter((e) => e.tag === "want");
   const needs = weekExpenses.filter((e) => e.tag === "need");
@@ -61,15 +64,18 @@ export default function FinancePage() {
             {week ? `Week of ${prettyDate(week.week_start_date)}${week.rollover_from_previous ? ` — with ${fmtMoney(week.rollover_from_previous)} rolled over` : ""}` : "Your first allowance week opens here."}
           </p>
         </div>
-        <NeoButton variant="accent" onClick={() => setShowAdd(true)} className="font-semibold">
-          <span className="inline-flex items-center gap-2"><Plus size={16} aria-hidden /> Add expense</span>
-        </NeoButton>
+        <div className="flex gap-2">
+          <NeoButton onClick={() => setShowAdjust(true)} className="font-semibold">Add funds</NeoButton>
+          <NeoButton variant="accent" onClick={() => setShowAdd(true)} className="font-semibold">
+            <span className="inline-flex items-center gap-2"><Plus size={16} aria-hidden /> Add expense</span>
+          </NeoButton>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 animate-fade-up [animation-delay:80ms]">
         <GlassCard className="p-5">
           <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ink-faint)] flex items-center gap-1.5"><Wallet2 size={12} aria-hidden /> Balance</p>
-          <p className="font-serif text-2xl sm:text-3xl mt-2 text-[var(--ink)]">{bal ? fmtMoney(bal.balance) : "—"}</p>
+          <p className="font-serif text-2xl sm:text-3xl mt-2 text-[var(--ink)]">{balance ? fmtMoney(balance.balance) : "—"}</p>
         </GlassCard>
         <GlassCard className="p-5">
           <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ink-faint)] flex items-center gap-1.5"><ReceiptText size={12} aria-hidden /> Spent this week</p>
@@ -96,6 +102,15 @@ export default function FinancePage() {
           />
           <div className="h-px bg-black/5 dark:bg-white/5 my-4" />
           <div className="space-y-2">
+            {(income ?? []).filter((entry) => week && entry.finance_week_id === week.id).slice(-5).reverse().map((entry) => (
+              <div key={`income-${entry.id}`} className="flex items-center justify-between text-sm">
+                <span className="flex items-center gap-2 text-[var(--ink)]">
+                  <Tag tone="good">income</Tag>
+                  {entry.note || "Extra funds"} <span className="text-[var(--ink-faint)]">{prettyDate(entry.date)}</span>
+                </span>
+                <span className="tabular-nums text-emerald-600">+{fmtMoney(entry.amount)}</span>
+              </div>
+            ))}
             {weekExpenses.slice(-5).reverse().map((e) => (
               <div key={e.id} className="flex items-center justify-between text-sm">
                 <span className="flex items-center gap-2 text-[var(--ink)]">
@@ -173,29 +188,27 @@ function AddExpenseModal({ open, onClose, weekId, today }: { open: boolean; onCl
   );
 }
 
-/** Modal: manually correct the balance (extra money from any source, or a correction). */
+/** Modal: record extra money received during the current allowance week. */
 function AdjustBalanceModal({ open, onClose, week }: { open: boolean; onClose: () => void; week?: { id?: number; opening_balance: number } }) {
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
   return (
     <Modal open={open} onClose={onClose} title="Add funds">
       <p className="text-sm text-[var(--ink-soft)] mb-4">
-        Any money beyond your allowance — a gift, payment for work, a larger collection, anything — goes in here, whenever it happens. Your balance updates by the amount; use a negative number to correct downward. Collected less than usual on allowance day? Log the shortfall as a regular expense instead.
+        Record a gift, payment for work, or any other money collected during this week. It will be added to your available balance and kept in the ledger.
       </p>
       {week?.id ? (
         <form
           onSubmit={async (e) => {
             e.preventDefault();
             const amt = parseFloat(amount);
-            if (isNaN(amt) || amt === 0) return;
-            await db.finance_weeks.update(week.id!, {
-              opening_balance: week.opening_balance + amt,
-            });
+            if (isNaN(amt) || amt <= 0) return;
+            await db.finance_income.add({ finance_week_id: week.id!, date: todayStr(), amount: amt, note: note.trim() });
             setAmount(""); setNote(""); onClose();
           }}
           className="space-y-4"
         >
-          <Field label="Amount (negative to reduce)" value={amount} onChange={setAmount} type="number" placeholder="+2000 or -500" />
+          <Field label="Amount" value={amount} onChange={setAmount} type="number" placeholder="2000" />
           <Field label="Note (optional)" value={note} onChange={setNote} />
           <div className="flex justify-end gap-2">
             <NeoButton onClick={onClose}>Cancel</NeoButton>
