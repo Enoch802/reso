@@ -14,7 +14,7 @@ import {
   academicScore, financeScore, routineScore, isSickDay,
   daysUntilExam, examCountdownText,
 } from "@/lib/calc";
-import { fmtMoney, longDate, prettyDate, addDays, DAY_SHORT, DAY_NAMES } from "@/lib/dates";
+import { fmtMoney, longDate, prettyDate, addDays, DAY_SHORT } from "@/lib/dates";
 
 export default function DashboardPage() {
   const today = useToday();
@@ -146,7 +146,7 @@ export default function DashboardPage() {
         </Link>
       )}
 
-      {/* Hero: ring + pillars */}
+      {/* Hero: ring + daily measures */}
       <GlassCard strong className="p-6 sm:p-8 animate-fade-up [animation-delay:150ms]">
         <div className="flex flex-col sm:flex-row items-center gap-8 sm:gap-12">
           <div>
@@ -156,8 +156,8 @@ export default function DashboardPage() {
           </div>
           <div className="flex-1 w-full space-y-3">
             <PillarRow
-              icon={<BookOpenCheck size={17} aria-hidden />} name="Academics"
-              value={pillars.a} detail={planTotal ? `${planDone}/${planTotal} plan items` : "no plan yet"}
+              icon={<BookOpenCheck size={17} aria-hidden />} name="Today's Plan"
+              value={pillars.a} detail={planTotal ? `${planDone}/${planTotal} done` : "no plan yet"}
             />
             <PillarRow
               icon={<Wallet2 size={17} aria-hidden />} name="Finance"
@@ -188,7 +188,7 @@ export default function DashboardPage() {
 
       {/* Checklist preview */}
       <div className="animate-fade-up [animation-delay:280ms]">
-        <SectionHeader icon={<BookOpenCheck size={20} aria-hidden />} title={`Plan for ${DAY_NAMES[new Date(today + "T00:00:00").getDay()]}`} sub="Tick them off as you go — each check counts." />
+        <SectionHeader icon={<BookOpenCheck size={20} aria-hidden />} title="Today's Plan" sub="Tick them off as you go — each check counts." />
         <GlassCard className="p-5">
           <Checklist compact />
         </GlassCard>

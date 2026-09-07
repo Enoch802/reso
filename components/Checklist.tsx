@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { NeoCheck, NeoButton, EmptyState, GlassCard } from "./ui";
 import { useToday } from "./AppShell";
 
-/** Today's plan as a checklist. Fresh per date; carryover is handled by AppShell's prompt. */
+/** Today's Plan as a simple checklist. Fresh per date; carryover is handled by AppShell's prompt. */
 export default function Checklist({ compact = false }: { compact?: boolean }) {
   const today = useToday();
   const [draft, setDraft] = useState("");
@@ -59,7 +59,7 @@ export default function Checklist({ compact = false }: { compact?: boolean }) {
         </NeoButton>
       </form>
 
-      <ul className="mt-4 space-y-2.5" aria-label="Today's plan">
+      <ul className="mt-4 space-y-2.5" aria-label="Today's Plan">
         {shown?.map((item, i) => (
           <li
             key={item.id}

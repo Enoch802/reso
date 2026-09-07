@@ -17,7 +17,7 @@ import {
 import { fmtMoney, longDate, prettyDate, weekStartOnOrBefore, addDays, daysBetween, DAY_NAMES, DAY_SHORT } from "@/lib/dates";
 
 /**
- * Overview — the one deliberately rich screen: ring, pillars, checklist,
+ * Overview — the one deliberately rich screen: ring, daily measures, checklist,
  * money, reminders, digest highlight, and topic coverage, all live.
  */
 export default function OverviewPage() {
@@ -150,14 +150,14 @@ export default function OverviewPage() {
         </div>
       </div>
 
-      {/* Hero ring + pillars */}
+      {/* Hero ring + daily measures */}
       <GlassCard strong className="p-6 sm:p-8 animate-fade-up [animation-delay:100ms]">
         <div className="flex flex-col sm:flex-row items-center gap-8 sm:gap-12">
           <div>
             {sick ? <Ring percent={0} label="Rest day" sublabel="not scored" /> : <Ring percent={overall ?? 0} label="Discipline" sublabel="today" />}
           </div>
           <div className="flex-1 w-full space-y-4">
-            <PillarRow icon={<BookOpenCheck size={17} aria-hidden />} name="Academics" value={acad} detail={planTotal ? `${planDone}/${planTotal} plan items done` : "no plan yet"} />
+            <PillarRow icon={<BookOpenCheck size={17} aria-hidden />} name="Today's Plan" value={acad} detail={planTotal ? `${planDone}/${planTotal} done` : "no plan yet"} />
             <PillarRow icon={<Wallet2 size={17} aria-hidden />} name="Finance" value={fin} detail={sick ? "rest day — not scored" : expensesToday?.length ? `${fmtMoney(expensesToday.reduce((a, e) => a + e.amount, 0))} logged today` : "nothing spent yet today"} />
             <PillarRow icon={<Repeat2 size={17} aria-hidden />} name="Routines" value={rout} detail={routinesToday.length ? `${doneCount}/${routinesToday.length} done today` : "nothing scheduled today"} />
           </div>
@@ -202,7 +202,7 @@ export default function OverviewPage() {
       {/* Checklist + money side by side */}
       <div className="grid md:grid-cols-2 gap-5 animate-fade-up [animation-delay:220ms]">
         <GlassCard className="p-5">
-          <SectionHeader icon={<ListChecks size={19} aria-hidden />} title={`Plan for ${DAY_NAMES[dow]}`} sub="Tick them off — each check counts." />
+          <SectionHeader icon={<ListChecks size={19} aria-hidden />} title="Today's Plan" sub="Tick them off — each check counts." />
           <Checklist compact />
           {planTotal > planDone && planTotal > 0 && (
             <Link href="/dashboard" className="focus-ring mt-3 inline-flex items-center gap-1 text-sm font-medium text-[var(--ink-soft)]">
