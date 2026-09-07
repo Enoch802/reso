@@ -27,7 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <script
           dangerouslySetInnerHTML={{
-            __html: `if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){})})}`,
+            __html: `if('serviceWorker' in navigator){window.addEventListener('load',function(){if(location.hostname==='localhost'||location.hostname==='127.0.0.1'){navigator.serviceWorker.getRegistrations().then(function(rs){rs.forEach(function(r){r.unregister()})});if('caches' in window){caches.keys().then(function(ks){ks.forEach(function(k){caches.delete(k)})})}return}navigator.serviceWorker.register('/sw.js').catch(function(){})})}`,
           }}
         />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
