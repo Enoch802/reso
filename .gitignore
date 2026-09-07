@@ -1,0 +1,22 @@
+# dependencies
+node_modules/
+
+# build output
+.next/
+out/
+dist/
+
+# env & secrets — never commit
+.env
+.env.local
+.env.*.local
+.env.production
+
+# logs & temp
+*.log
+server.log
+tsconfig.tsbuildinfo
+
+# os junk
+.DS_Store
+Thumbs.db
