@@ -202,9 +202,16 @@ function TimetableModal({ open, onClose }: { open: boolean; onClose: () => void 
         kind="class"
         courseCodes={(courses ?? []).map((c) => c.code)}
         onSave={async (rows: ReviewRow[]) => {
+          const affectedCourseIds = new Set<number>();
           for (const r of rows) {
-            const code = r.course_code.toUpperCase();
-            let course = (courses ?? []).find((c) => c.code === code);
+            const code = r.course_code.trim().toUpperCase();
+            const course = (courses ?? []).find((c) => c.code.trim().toUpperCase() === code);
+            if (course?.id) affectedCourseIds.add(course.id);
+          }
+          await Promise.all(Array.from(affectedCourseIds, (courseId) => db.timetable_slots.where("course_id").equals(courseId).delete()));
+          for (const r of rows) {
+            const code = r.course_code.trim().toUpperCase();
+            let course = (courses ?? []).find((c) => c.code.trim().toUpperCase() === code);
             if (!course) {
               const id = await db.courses.add({
                 code, title: code, credit_units: 3, course_type: "general",
@@ -215,7 +222,7 @@ function TimetableModal({ open, onClose }: { open: boolean; onClose: () => void 
             }
             const day = dayToNum(r.day);
             if (day == null) continue;
-            await db.timetable_slots.add({ course_id: course.id!, day_of_week: day, start_time: r.start_time, end_time: r.end_time, venue: "" });
+            await db.timetable_slots.add({ course_id: course.id!, day_of_week: day, start_time: r.start_time, end_time: r.end_time, venue: r.venue?.trim() ?? "" });
           }
         }}
       />
@@ -539,10 +546,12 @@ function DataModal({ open, onClose }: { open: boolean; onClose: () => void }) {
               <NeoButton
                 onClick={async () => {
                   await clearSampleData();
+                  const current = (await db.profile.toArray())[0];
+                  if (current) await db.profile.update(current.id!, { onboarding_complete: 0, new_semester_mode: 0 });
                   setHasSample(false);
-                  setSeedMsg("Sample data cleared — the app is empty again.");
+                  setSeedMsg("Sample data cleared — starting your own semester now.");
                 }}
-              >Clear sample data</NeoButton>
+              >Start my own semester</NeoButton>
             ) : (
               <NeoButton
                 variant="accent"

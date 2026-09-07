@@ -155,7 +155,7 @@ export default function CourseDetailPage() {
             {(slots ?? []).slice().sort((a, b) => a.day_of_week - b.day_of_week || a.start_time.localeCompare(b.start_time)).map((sl) => (
               <li key={sl.id} className="flex items-center justify-between rounded-xl neo-sm px-4 py-3 text-sm">
                 <span className="font-medium text-[var(--ink)]">{DAY_NAMES[sl.day_of_week]}</span>
-                <span className="tabular-nums text-[var(--ink-soft)]">{sl.start_time} – {sl.end_time}</span>
+                <span className="tabular-nums text-[var(--ink-soft)]">{sl.start_time} – {sl.end_time}{sl.venue ? ` · ${sl.venue}` : ""}</span>
               </li>
             ))}
           </ul>

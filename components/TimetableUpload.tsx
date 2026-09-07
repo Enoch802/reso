@@ -232,7 +232,7 @@ export default function TimetableUpload({
           )}
           <div className="max-h-72 overflow-y-auto rounded-2xl neo-pressed p-3 space-y-2">
             {rows.map((r) => (
-              <div key={r._key} className={`grid gap-2 items-center ${kind === "class" ? "grid-cols-2 sm:grid-cols-5" : "grid-cols-2 sm:grid-cols-6"}`}>
+              <div key={r._key} className={`grid gap-2 items-center ${kind === "class" ? "grid-cols-2 sm:grid-cols-6" : "grid-cols-2 sm:grid-cols-6"}`}>
                 <input
                   aria-label="Course code"
                   value={r.course_code}
@@ -257,7 +257,7 @@ export default function TimetableUpload({
                   onChange={(e) => setRow(r._key, { end_time: e.target.value })}
                   className="focus-ring rounded-lg bg-[var(--neo-base)] border border-white/30 dark:border-white/5 px-2.5 py-1.5 text-sm"
                 />
-                {kind !== "class" && (
+                {(
                   <input
                     aria-label={kind === "study" ? "What the block covers" : "Venue"}
                     value={r.venue}

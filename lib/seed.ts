@@ -191,7 +191,7 @@ export async function clearSampleData() {
   await Promise.all([
     db.courses.clear(), db.course_ca_components.clear(), db.course_scores.clear(),
     db.course_topics.clear(), db.timetable_slots.clear(), db.exams.clear(),
-    db.personal_study_slots.clear(), db.finance_weeks.clear(), db.expenses.clear(),
+    db.personal_study_slots.clear(), db.finance_weeks.clear(), db.expenses.clear(), db.finance_income.clear(),
     db.routines.clear(), db.routine_logs.clear(), db.daily_plan_items.clear(),
     db.daily_logs.clear(), db.chat_messages.clear(), db.discipline_scores.clear(),
     db.weekly_digests.clear(),
