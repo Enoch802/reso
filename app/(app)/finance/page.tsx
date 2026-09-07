@@ -52,7 +52,7 @@ export default function FinancePage() {
 
   const cycleEnd = week ? days[6] : null;
   const isCycleEnd = cycleEnd ? cycleEnd.ds === today || cycleEnd.ds < today : false;
-  const saved = bal ? Math.max(0, bal.balance - 0) : 0;
+  const saved = balance ? Math.max(0, balance.balance - 0) : 0;
   const savingsOk = settings ? saved >= settings.weekly_savings_target : false;
 
   return (
