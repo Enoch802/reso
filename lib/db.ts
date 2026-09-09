@@ -162,6 +162,12 @@ export interface DailyLog {
   screen_time_top_app?: string | null;
 }
 
+/** Single-row settings table: whether screen time tracking is turned on. */
+export interface ScreentimeTracking {
+  id?: number; // always 0 — single settings row
+  enabled: 0 | 1;
+}
+
 export interface ChatMessage {
   id?: number;
   date: string;
@@ -360,7 +366,8 @@ export async function exportAllData(): Promise<string> {
     "finance_settings", "finance_weeks", "expenses", "finance_income", "routines",
     "routine_logs", "daily_plan_items", "daily_logs", "chat_messages",
     "discipline_scores", "weekly_digests", "email_accounts", "email_items",
-    "archived_semesters",
+    "archived_semesters", "screentime_tracking", "reminder_prefs",
+    "custom_reminders", "alarms", "course_chats",
   ];
   for (const t of tables) {
     dump[t] = await (db as unknown as Record<string, Table>)[t].toArray();
