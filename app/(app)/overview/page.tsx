@@ -31,20 +31,20 @@ export default function OverviewPage() {
   const exams = useLiveQuery(() => db.exams.toArray(), []);
   const slots = useLiveQuery(() => db.timetable_slots.toArray(), []);
   const planItems = useLiveQuery(() => db.daily_plan_items.where("date").equals(today).toArray(), [today]);
-  const expensesToday = useLiveQuery(() => db.expenses.where("date").equals(today).toArray(), [today]);
+  const expenses = useLiveQuery(() => db.expenses.where("date").equals(today).toArray(), [today]);
   const allExpenses = useLiveQuery(() => db.expenses.toArray(), []);
   const fs = useLiveQuery(() => db.finance_settings.toArray(), []);
   const weeks = useLiveQuery(() => db.finance_weeks.toArray(), []);
   const routines = useLiveQuery(() => db.routines.toArray(), []);
   const routineLogs = useLiveQuery(() => db.routine_logs.where("date").equals(today).toArray(), [today]);
-  const allLogs = useLiveQuery(() => db.routine_logs.toArray(), []);
+  const logs = useLiveQuery(() => db.routine_logs.toArray(), []);
   const dailyLog = useLiveQuery(() => db.daily_logs.where("date").equals(today).toArray(), [today]);
   const weekScores = useLiveQuery(() => db.discipline_scores.toArray(), []);
   const digests = useLiveQuery(async () => {
     const all = await db.weekly_digests.toArray();
     return all.sort((a, b) => b.created_at - a.created_at).slice(0, 1);
   }, []);
-  const dailyLogsAll = useLiveQuery(() => db.daily_logs.toArray(), []);
+  const dailyLogs = useLiveQuery(() => db.daily_logs.toArray(), []);
 
   const p = profile?.[0];
   const settings = fs?.[0];
@@ -53,7 +53,7 @@ export default function OverviewPage() {
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
   const acad = academicScore(planItems ?? []);
-  const fin = sick ? null : financeScore(expensesToday ?? [], settings?.daily_spending_target ?? 0);
+  const fin = sick ? null : financeScore(expenses ?? [], settings?.daily_spending_target ?? 0);
   const rout = routineScore(routines ?? [], routineLogs ?? [], today);
   const pillars = [acad, fin, rout].filter((v): v is number => v != null);
   const overall = pillars.length ? pillars.reduce((a, b) => a + b, 0) / pillars.length : null;
@@ -63,8 +63,16 @@ export default function OverviewPage() {
     const ws = weekStartOnOrBefore(today, settings.allowance_collection_day);
     return weeks.find((w) => w.week_start_date === ws);
   }, [weeks, settings, today]);
-  const weekSpend = (allExpenses ?? []).filter((e) => week && e.finance_week_id === week.id).reduce((a, e) => a + e.amount, 0);
-  const balance = week ? week.opening_balance - weekSpend : null;
+
+  const weekSpend = useMemo(() => {
+    if (!week || !allExpenses) return 0;
+    return allExpenses.filter((e) => e.finance_week_id === week.id).reduce((a, e) => a + e.amount, 0);
+  }, [week, allExpenses]);
+
+  const balance = useMemo(() => {
+    if (!week) return null;
+    return week.opening_balance - weekSpend;
+  }, [week, weekSpend]);
 
   // Balance trend: last 4 allowance cycles
   const balanceTrend = useMemo(() => {
@@ -107,9 +115,9 @@ export default function OverviewPage() {
   }), [topics]);
 
   const topStreak = useMemo(() => {
-    const rows = (routines ?? []).map((r) => ({ name: r.name, s: routineStreak(r, allLogs ?? []) })).sort((a, b) => b.s - a.s);
+    const rows = (routines ?? []).map((r) => ({ name: r.name, s: routineStreak(r, logs ?? []) })).sort((a, b) => b.s - a.s);
     return rows[0] && rows[0].s > 0 ? rows[0] : null;
-  }, [routines, allLogs]);
+  }, [routines, logs]);
 
   const weekStrip = useMemo(() => {
     if (!weekScores) return [];
@@ -123,13 +131,26 @@ export default function OverviewPage() {
   const semesterDay = p ? Math.max(0, daysBetween(p.semester_start_date, today) + 1) : 0;
   const semesterLen = p ? Math.max(1, daysBetween(p.semester_start_date, p.semester_end_date) + 1) : 1;
   const semesterPct = Math.min(100, Math.round((semesterDay / semesterLen) * 100));
-  const journalStreakDays = new Set((dailyLogsAll ?? []).filter((l) => l.evening_reflection_text?.trim()).map((l) => l.date)).size;
+
+  const journalStreakDays = useMemo(() => {
+    return new Set((dailyLogs ?? []).filter((l) => l.evening_reflection_text?.trim()).map((l) => l.date)).size;
+  }, [dailyLogs]);
+
   const latestDigest = digests?.[0];
   const digestPreview = latestDigest?.digest_text.split("\n").filter(Boolean).slice(0, 2).join(" ") ?? "";
 
-  const routinesToday = (routines ?? []).filter((r) => r.schedule_days.includes(dow));
-  const doneCount = routinesToday.filter((r) => (routineLogs ?? []).some((l) => l.routine_id === r.id && l.status === "done")).length;
-  const planDone = (planItems ?? []).filter((i) => i.checked).length;
+  const routinesToday = useMemo(() => {
+    return (routines ?? []).filter((r) => r.schedule_days.includes(dow));
+  }, [routines, dow]);
+
+  const doneCount = useMemo(() => {
+    return routinesToday.filter((r) => (logs ?? []).some((l) => l.routine_id === r.id && l.status === "done")).length;
+  }, [routinesToday, logs]);
+
+  const planDone = useMemo(() => {
+    return (planItems ?? []).filter((i) => i.checked).length;
+  }, [planItems]);
+
   const planTotal = planItems?.length ?? 0;
 
   return (
@@ -158,7 +179,7 @@ export default function OverviewPage() {
           </div>
           <div className="flex-1 w-full space-y-4">
             <PillarRow icon={<BookOpenCheck size={17} aria-hidden />} name="Today's Plan" value={acad} detail={planTotal ? `${planDone}/${planTotal} done` : "no plan yet"} />
-            <PillarRow icon={<Wallet2 size={17} aria-hidden />} name="Finance" value={fin} detail={sick ? "rest day — not scored" : expensesToday?.length ? `${fmtMoney(expensesToday.reduce((a, e) => a + e.amount, 0))} logged today` : "nothing spent yet today"} />
+            <PillarRow icon={<Wallet2 size={17} aria-hidden />} name="Finance" value={fin} detail={sick ? "rest day — not scored" : expenses?.length ? `${fmtMoney(expenses.reduce((a, e) => a + e.amount, 0))} logged today` : "nothing spent yet today"} />
             <PillarRow icon={<Repeat2 size={17} aria-hidden />} name="Routines" value={rout} detail={routinesToday.length ? `${doneCount}/${routinesToday.length} done today` : "nothing scheduled today"} />
           </div>
         </div>
@@ -255,7 +276,7 @@ export default function OverviewPage() {
           </Link>
 
           {/* Evening spend check-in */}
-          {hour >= 21 && (expensesToday ?? []).length === 0 && <SpendCheckIn today={today} weekId={week?.id} />}
+          {hour >= 21 && (expenses ?? []).length === 0 && <SpendCheckIn today={today} weekId={week?.id} />}
         </div>
       </div>
 

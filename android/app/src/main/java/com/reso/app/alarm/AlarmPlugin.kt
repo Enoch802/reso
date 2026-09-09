@@ -62,7 +62,7 @@ class AlarmPlugin : Plugin() {
         val id = call.getInt("id") ?: return call.reject("id is required")
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         alarmManager.cancel(pendingFire(context, id, ""))
-        val remaining = loadAlarms().filter { it.first != id }
+        val remaining = loadAlarms().filter { it.id != id }
         prefs.edit().putString("alarms", serialize(remaining)).apply()
         call.resolve()
     }

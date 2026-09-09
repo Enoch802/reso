@@ -29,12 +29,12 @@ export default function DashboardPage() {
   const courses = useLiveQuery(() => db.courses.toArray(), []);
   const exams = useLiveQuery(() => db.exams.toArray(), []);
   const financeWeeks = useLiveQuery(() => db.finance_weeks.toArray(), []);
-  const allExpenses = useLiveQuery(() => db.expenses.toArray(), []);
   const emailItems = useLiveQuery(
     () => db.email_items.where("fetched_date").equals(today).toArray(),
     [today]
   );
   const weekScores = useLiveQuery(() => db.discipline_scores.toArray(), []);
+  const expensesAll = useLiveQuery(() => db.expenses.toArray(), []);
 
   const name = profile?.[0]?.name?.split(" ")[0] ?? "friend";
   const hour = new Date().getHours();
@@ -49,7 +49,7 @@ export default function DashboardPage() {
     const vals = [a, f, r].filter((v): v is number => v != null);
     const overall = vals.length ? vals.reduce((x, y) => x + y, 0) / vals.length : 0;
     return { a, f, r, overall };
-  }, [planItems, expenses, routines, routineLogs, fs, today, sick]);
+  }, [planItems, expenses, routines, routineLogs, fs, sick, today]);
 
   // Persist today's discipline snapshot (patterns, not single days).
   useEffect(() => {
@@ -69,11 +69,11 @@ export default function DashboardPage() {
 
 
   const balance = useMemo(() => {
-    if (!financeWeeks?.length || !allExpenses) return null;
+    if (!financeWeeks?.length || !expensesAll) return null;
     const week = financeWeeks[financeWeeks.length - 1];
-    const spent = allExpenses.filter((e) => e.finance_week_id === week.id).reduce((a, e) => a + e.amount, 0);
+    const spent = expensesAll.filter((e) => e.finance_week_id === week.id).reduce((a, e) => a + e.amount, 0);
     return { balance: week.opening_balance - spent, week };
-  }, [financeWeeks, allExpenses]);
+  }, [financeWeeks, expensesAll]);
 
   const nextExam = useMemo(() => {
     if (!exams?.length || !courses) return null;
@@ -86,23 +86,38 @@ export default function DashboardPage() {
 
   const weekStrip = useMemo(() => {
     if (!weekScores) return [];
+    const todayDay = new Date(today + "T00:00:00").getDay();
+    const dayOfWeekMap: { [key: string]: string } = { 0: "S", 1: "M", 2: "T", 3: "W", 4: "T", 5: "F", 6: "S" };
     return Array.from({ length: 7 }).map((_, i) => {
       const d = addDays(today, i - 6);
       const row = weekScores.find((s) => s.date === d);
-      return { date: d, day: DAY_SHORT[new Date(d + "T00:00:00").getDay()], score: row?.overall_score };
+      return { date: d, day: dayOfWeekMap[new Date(d + "T00:00:00").getDay()], score: row?.overall_score };
     });
   }, [weekScores, today]);
 
-  const routinesToday = (routines ?? []).filter((r) =>
-    r.schedule_days.includes(new Date(today + "T00:00:00").getDay())
-  );
-  const routinesDone = routinesToday.filter((r) =>
-    (routineLogs ?? []).some((l) => l.routine_id === r.id && l.status === "done")
-  );
+  const routinesToday = useMemo(() => {
+    const todayDay = new Date(today + "T00:00:00").getDay();
+    return (routines ?? []).filter((r) => r.schedule_days.includes(todayDay));
+  }, [routines, today]);
 
-  const important = (emailItems ?? []).filter((e) => e.rank === "important");
-  const reflected = (dailyLog ?? []).some((l) => l.evening_reflection_text?.trim());
-  const planDone = (planItems ?? []).filter((i) => i.checked).length;
+  const routinesDone = useMemo(() => {
+    return routinesToday.filter((r) =>
+      (routineLogs ?? []).some((l) => l.routine_id === r.id && l.status === "done")
+    );
+  }, [routinesToday, routineLogs]);
+
+  const important = useMemo(() => {
+    return (emailItems ?? []).filter((e) => e.rank === "important");
+  }, [emailItems]);
+
+  const reflected = useMemo(() => {
+    return (dailyLog ?? []).some((l) => l.evening_reflection_text?.trim());
+  }, [dailyLog]);
+
+  const planDone = useMemo(() => {
+    return (planItems ?? []).filter((i) => i.checked).length;
+  }, [planItems]);
+
   const planTotal = planItems?.length ?? 0;
 
   return (

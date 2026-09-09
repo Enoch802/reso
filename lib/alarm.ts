@@ -114,10 +114,20 @@ export function nativeAlarmSchedulerAvailable(): boolean {
  * app fully closed (exact alarms + boot restore). No-op on web/PWA, where the
  * in-app engine handles ringing while the app is open.
  */
+
 export async function syncNativeAlarms(alarms: NativeAlarm[]): Promise<void> {
   if (!nativeAlarmSchedulerAvailable()) return;
   try {
     const plugins = (window as unknown as { Capacitor: { Plugins: Record<string, { scheduleAll: (o: { alarms: NativeAlarm[] }) => Promise<void> }> } }).Capacitor.Plugins;
     await plugins.AlarmScheduler.scheduleAll({ alarms });
   } catch { /* native scheduling failed silently — in-app engine still applies */ }
+}
+
+/** Detect native Capacitor shell and push full alarm list to native AlarmManager. */
+export async function scheduleNativeIfRunning(alarms: NativeAlarm[]): Promise<void> {
+  if (typeof window === "undefined") return;
+  const cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean; Plugins?: Record<string, unknown> } }).Capacitor;
+  const isNative = !!cap?.isNativePlatform?.();
+  if (!isNative) return;
+  await syncNativeAlarms(alarms);
 }

@@ -5,16 +5,18 @@ import {
   UserRound, CalendarRange, BookOpenCheck, CalendarClock, CalendarDays, CalendarCheck2, AlarmClock, NotebookPen,
   Wallet2, Repeat2, Mail, Palette, Database, ChevronRight, ChevronDown, Bell, Download, Award, Trash2,
 } from "lucide-react";
-import { db, exportAllData } from "@/lib/db";
+import { db, exportAllData, getScreenTimeEnabled, setScreenTimeEnabled, getMeta, setMeta } from "@/lib/db";
 import { loadSampleData, clearSampleData } from "@/lib/seed";
-import { getMeta } from "@/lib/db";
 import { GlassCard, SectionHeader, Field, NeoButton, Modal, Tag, EmptyState } from "@/components/ui";
 import TimetableUpload, { ReviewRow, dayToNum } from "@/components/TimetableUpload";
 import Recap from "@/components/Recap";
 import { ExamEditor } from "@/components/academics-exam";
 import { fmtMoney } from "@/lib/dates";
 import { googleConfigured, requestGmailAccess } from "@/lib/google";
-import { syncNativeAlarms } from "@/lib/alarm";
+import { syncNativeAlarms, scheduleNativeIfRunning } from "@/lib/alarm";
+import { Capacitor } from "@capacitor/core";
+import { Filesystem, Directory } from "@capacitor/filesystem";
+import { Share } from "@capacitor/share";
 import { fetchRankedEmails } from "@/lib/ai";
 import { screenTimeAvailable, screenTimePermission, openScreenTimeSettings, pullYesterdayScreenTime } from "@/lib/screentime";
 import { Hourglass } from "lucide-react";
@@ -509,9 +511,10 @@ function DataModal({ open, onClose }: { open: boolean; onClose: () => void }) {
     <>
       <Modal open={open} onClose={onClose} title="Data & recap" wide>
         <div className="space-y-4">
-          <p className="text-xs text-[var(--ink-faint)] -mt-1 mb-1">
-            Reso has no server-side storage — this export is the only backup mechanism. Keep a copy somewhere safe.
-          </p>
+                  <p className="text-xs text-[var(--ink-faint)] -mt-1 mb-1">
+                    Reso has no server-side storage — this export is the only backup mechanism. Keep a copy somewhere safe.
+                    {Capacitor.isNativePlatform?.() && <span className="block mt-1">On Android, the file will be saved to the app's Documents folder and can be shared via the share sheet.</span>}
+                  </p>
           <div className="flex items-center justify-between gap-3 rounded-2xl neo p-4">
             <div>
               <p className="font-medium text-[var(--ink)] text-sm flex items-center gap-2"><Download size={15} aria-hidden /> Export my data</p>
@@ -519,11 +522,51 @@ function DataModal({ open, onClose }: { open: boolean; onClose: () => void }) {
             </div>
             <NeoButton
               onClick={async () => {
-                const json = await exportAllData();
-                const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
-                const a = document.createElement("a");
-                a.href = url; a.download = "reso-data.json"; a.click();
-                URL.revokeObjectURL(url);
+                try {
+                  const json = await exportAllData();
+                  const isNative = Capacitor.isNativePlatform?.();
+                  if (isNative && typeof Filesystem !== "undefined" && typeof Share !== "undefined") {
+                    // Native Android: write to Documents, then share
+                    const fileName = "reso-data.json";
+                    await Filesystem.writeFile({
+                      path: fileName,
+                      data: json,
+                      directory: Directory.Documents,
+                      recursive: false,
+                    });
+                    // Get the absolute file URI for the share sheet
+                    const fileUri = await Filesystem.getUri({
+                      directory: Directory.Documents,
+                      path: fileName,
+                    });
+                    await Share.share({
+                      title: "Reso data export",
+                      text: "Your Reso data backup (JSON)",
+                      url: fileUri.uri,
+                      dialogTitle: "Save or share your Reso data",
+                    });
+                    alert("Export complete! Share sheet opened. You can save the file to your device, send it to yourself via email/Google Drive, or share it to another app.");
+                  } else {
+                    // Web / PWA: standard blob download
+                    const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+                    const a = document.createElement("a");
+                    a.href = url; a.download = "reso-data.json"; a.click();
+                    URL.revokeObjectURL(url);
+                    alert("Export complete! reso-data.json has been downloaded to your device.");
+                  }
+                } catch (e: unknown) {
+                  const msg = e instanceof Error ? e.message : "Unknown error";
+                  // Provide more helpful error messages for common issues
+                  let userMsg = msg;
+                  if (msg.includes("PERMISSION_DENIED") || msg.includes("storage")) {
+                    userMsg = "Storage permission denied. Please grant storage permission in Settings > Apps > Reso > Permissions.";
+                  } else if (msg.includes("MANAGE_EXTERNAL_STORAGE")) {
+                    userMsg = "Full storage access is needed. Please grant permission in Settings > Apps > Reso > Permissions > All Files Access.";
+                  } else if (msg.includes("not available")) {
+                    userMsg = "Share plugin not available on this platform.";
+                  }
+                  alert("Export failed: " + userMsg);
+                }
               }}
             >Export</NeoButton>
           </div>
@@ -610,54 +653,94 @@ function RemoveCourse({ code, courseId }: { code: string; courseId: number }) {
  * On the web/PWA build there is no native bridge: this explains calmly and enables nothing.
  */
 function ScreenTimeModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [state, setState] = useState<"loading" | "web" | "granted" | "denied">("loading");
+  const [enabled, setEnabled] = useState<0 | 1>(0);
+  const [loading, setLoading] = useState(true);
+  const [permissionState, setPermissionState] = useState<"loading" | "granted" | "denied" | "web">("loading");
   const [justGranted, setJustGranted] = useState(false);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setLoading(true);
+      return;
+    }
     (async () => {
+      setLoading(true);
       const perm = await screenTimePermission();
-      setState(perm === "granted" ? "granted" : perm === "denied" ? "denied" : "web");
-      if (perm === "granted") await pullYesterdayScreenTime().catch(() => null);
+      setPermissionState(perm === "granted" ? "granted" : perm === "denied" ? "denied" : "web");
+      setEnabled(await getScreenTimeEnabled());
+      setLoading(false);
     })();
   }, [open]);
 
+  const handleToggle = async (checked: boolean) => {
+    const newState = checked ? 1 : 0;
+    setEnabled(newState);
+    await setScreenTimeEnabled(newState);
+    if (checked && permissionState === "granted") {
+      await pullYesterdayScreenTime().catch(() => null);
+    } else if (!checked) {
+      // Clear the last pull date so it will pull again next time
+      await setMeta("screentime_last_pull", "");
+    }
+  };
+
   return (
     <Modal open={open} onClose={onClose} title="Screen time tracking">
-      {state === "loading" && <p className="text-sm text-[var(--ink-soft)]">Checking this device…</p>}
+      {loading ? (
+        <p className="text-sm text-[var(--ink-soft)]">Loading…</p>
+      ) : (
+        <div className="text-sm text-[var(--ink-soft)] space-y-4">
+          <div className="flex items-center justify-between p-3 rounded-xl bg-[var(--neo-base)] dark:bg-[var(--neo-base-dark)]">
+            <div className="flex-1">
+              <p className="font-medium text-[var(--ink)]">Screen time tracking</p>
+              <p className="text-xs text-[var(--ink-faint)] mt-0.5">Read-only, stays on this device</p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                className="sr-only peer"
+                checked={enabled === 1}
+                onChange={(e) => handleToggle(e.target.checked)}
+              />
+              <div className="w-11 h-6 bg-[var(--ink-faint)] peer-focus:outline-none rounded-full peer dark:bg-[var(--ink-faint)] peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--accent)]"></div>
+            </label>
+          </div>
 
-      {state === "web" && (
-        <div className="text-sm text-[var(--ink-soft)] space-y-3">
-          <p>Screen time comes from Android itself, so it only works inside the Reso Android app — not in a browser.</p>
-          <p>Everything else keeps working exactly as it does now. If you install the Android build later, this is where the one-time setup happens.</p>
-          <p className="text-xs text-[var(--ink-faint)]">This data never leaves your device — it lands in the same local store as everything else.</p>
-        </div>
-      )}
+          {permissionState === "web" && (
+            <div className="p-3 rounded-xl bg-[var(--neo-base)] dark:bg-[var(--neo-base-dark)]">
+              <p className="font-medium text-[var(--ink)] mb-1">Android-only feature</p>
+              <p className="text-xs text-[var(--ink-faint)]">Screen time comes from Android's UsageStatsManager. Works only in the Reso Android app — not in a browser or PWA.</p>
+            </div>
+          )}
 
-      {state === "granted" && (
-        <div className="text-sm text-[var(--ink-soft)] space-y-3">
-          <p className="text-emerald-600 dark:text-emerald-300 font-medium">Screen time tracking is on.</p>
-          <p>Each day, Reso quietly reads yesterday's usage from Android — how long you were on your phone, and which app took most of that time. It lands beside your evening reflection as supporting context, never a headline.</p>
-          <p className="text-xs text-[var(--ink-faint)]">Stored only on this device. To turn it off later, revoke usage access for Reso in Android settings.</p>
-        </div>
-      )}
+          {permissionState === "granted" && enabled === 1 && (
+            <div className="p-3 rounded-xl bg-[var(--neo-base)] dark:bg-[var(--neo-base-dark)] border border-emerald-200 dark:border-emerald-900/30">
+              <p className="text-emerald-600 dark:text-emerald-300 font-medium mb-1">Active</p>
+              <p>Each day, Reso quietly reads yesterday's usage from Android — how long you were on your phone, and which app took most of that time. It lands beside your evening reflection as supporting context, never a headline.</p>
+            </div>
+          )}
 
-      {state === "denied" && (
-        <div className="text-sm text-[var(--ink-soft)] space-y-3">
-          <p>With your okay, Reso reads your phone usage straight from your Android device — total screen time and the app you spent it on most. It stays beside your evening reflection, so on a heavy-phone day the picture of your week stays honest rather than mysterious.</p>
-          <p>It's read-only, it stays on this device, and it's entirely optional — the app works fully without it.</p>
-          {justGranted && <p className="text-xs text-[var(--ink-soft)]">If you've just allowed it, Reso will pick it up next time you open the app.</p>}
-          <NeoButton
-            variant="accent"
-            className="font-semibold"
-            onClick={async () => {
-              setJustGranted(true);
-              await openScreenTimeSettings();
-            }}
-          >
-            Open Android settings to allow
-          </NeoButton>
-          <p className="text-xs text-[var(--ink-faint)]">Look for "Usage access" and allow it for Reso — a one-time step.</p>
+          {permissionState === "denied" && enabled === 1 && (
+            <div className="p-3 rounded-xl bg-[var(--neo-base)] dark:bg-[var(--neo-base-dark)]">
+              <p className="text-amber-600 dark:text-amber-300 font-medium mb-1">Permission required</p>
+              <p>Reso reads your phone usage straight from Android — total screen time and the app you spent it on most. It stays beside your evening reflection, so on a heavy-phone day the picture of your week stays honest rather than mysterious.</p>
+              <p className="text-xs text-[var(--ink-faint)] mt-1">It's read-only, stays on this device, and entirely optional.</p>
+              {justGranted && <p className="text-xs text-[var(--ink-soft)] mt-2">If you've just allowed it, Reso will pick it up next time you open the app.</p>}
+              <NeoButton
+                variant="accent"
+                className="font-semibold mt-3"
+                onClick={async () => {
+                  setJustGranted(true);
+                  await openScreenTimeSettings();
+                }}
+              >
+                Open Android settings to allow
+              </NeoButton>
+              <p className="text-xs text-[var(--ink-faint)] mt-1">Look for "Usage access" and allow it for Reso — a one-time step.</p>
+            </div>
+          )}
+
+          <p className="text-xs text-[var(--ink-faint)]">To turn it off later, simply toggle the switch here, or revoke usage access for Reso in Android settings.</p>
         </div>
       )}
     </Modal>
@@ -877,13 +960,58 @@ function AlarmsModal({ open, onClose }: { open: boolean; onClose: () => void }) 
   const alarms = useLiveQuery(() => db.alarms.toArray(), [open]) ?? [];
   const [label, setLabel] = useState("");
   const [time, setTime] = useState("06:30");
+  const [editing, setEditing] = useState<{ id: number; label: string; time: string } | null>(null);
 
-  // Keep the native AlarmManager in step whenever the list changes.
-  useEffect(() => {
-    if (alarms.length) {
-      void syncNativeAlarms(alarms.map((a) => ({ id: a.id!, label: a.label, time: a.time, enabled: a.enabled })));
-    }
-  }, [alarms]);
+  // Helper to sync native alarms after any CRUD operation
+  const syncNative = async () => {
+    const currentAlarms = await db.alarms.toArray();
+    const nativeAlarms = currentAlarms.map((a) => ({
+      id: a.id!,
+      label: a.label,
+      time: a.time,
+      enabled: a.enabled === 1 ? 1 : 0,
+    }));
+    await scheduleNativeIfRunning(nativeAlarms);
+  };
+
+  const handleAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!label.trim()) return;
+    await db.alarms.add({ label: label.trim(), time, enabled: 1 });
+    setLabel("");
+    setEditing(null);
+    await syncNative();
+  };
+
+  const handleUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editing) return;
+    await db.alarms.update(editing.id, { label: label.trim(), time, enabled: 1 });
+    setEditing(null);
+    await syncNative();
+  };
+
+  const handleDelete = async (id: number) => {
+    await db.alarms.delete(id);
+    await syncNative();
+  };
+
+  const handleToggle = async (id: number, enabled: boolean) => {
+    await db.alarms.update(id, { enabled: enabled ? 1 : 0 });
+    await syncNative();
+  };
+
+  const openEdit = (alarm: { id: number; label: string; time: string }) => {
+    setEditing(alarm);
+    setLabel(alarm.label);
+    setTime(alarm.time);
+  };
+
+  const closeEdit = () => {
+    setEditing(null);
+    setLabel("");
+    setTime("06:30");
+  };
 
   return (
     <Modal open={open} onClose={onClose} title="Alarms" wide>
@@ -892,19 +1020,28 @@ function AlarmsModal({ open, onClose }: { open: boolean; onClose: () => void }) 
         On the Android app it rings even with Reso fully closed. In the browser it rings while Reso is open on this device.
       </p>
 
+      {/* Add alarm form */}
       <form
-        onSubmit={async (e) => {
-          e.preventDefault();
-          if (!label.trim()) return;
-          await db.alarms.add({ label: label.trim(), time, enabled: 1 });
-          setLabel("");
-        }}
+        onSubmit={handleAdd}
         className="flex flex-wrap gap-2 items-end mb-4"
       >
         <Field label="Alarm name" value={label} onChange={setLabel} placeholder="Morning prayer, Gym, Study block..." className="flex-1 min-w-[170px]" />
         <Field label="Time" value={time} onChange={setTime} type="time" className="w-[120px]" />
-        <NeoButton type="submit" variant="accent" className="font-semibold">Add alarm</NeoButton>
+        <NeoButton type="submit" variant="accent" className="font-semibold">{editing ? 'Save' : 'Add alarm'}</NeoButton>
       </form>
+
+      {/* Edit alarm form (shown when editing) */}
+      {editing && (
+        <form
+          onSubmit={handleUpdate}
+          className="flex flex-wrap gap-2 items-end mb-4"
+        >
+          <Field label="Alarm name" value={label} onChange={setLabel} placeholder="Morning prayer, Gym, Study block..." className="flex-1 min-w-[170px]" />
+          <Field label="Time" value={time} onChange={setTime} type="time" className="w-[120px]" />
+          <NeoButton type="submit" variant="accent" className="font-semibold">Save</NeoButton>
+          <NeoButton type="button" onClick={closeEdit} className="font-semibold">Cancel</NeoButton>
+        </form>
+      )}
 
       {alarms.length === 0 ? (
         <p className="text-xs text-[var(--ink-faint)]">No alarms yet — add one above. It rings every day at its time until you turn it off.</p>
@@ -917,9 +1054,19 @@ function AlarmsModal({ open, onClose }: { open: boolean; onClose: () => void }) 
                 <p className="text-xs text-[var(--ink-faint)]">every day at {a.time}</p>
               </div>
               <div className="flex items-center gap-2.5 shrink-0">
-                <NeoSwitch checked={a.enabled === 1} label={`Toggle alarm ${a.label}`} onChange={(v) => db.alarms.update(a.id!, { enabled: v ? 1 : 0 })} />
+                <NeoSwitch checked={a.enabled === 1} label={`Toggle alarm ${a.label}`} onChange={(v) => handleToggle(a.id!, v)} />
                 <button
-                  onClick={async () => { await db.alarms.delete(a.id!); }}
+                  onClick={() => {
+                    const { id, label, time } = a;
+                    if (id !== undefined) openEdit({ id, label, time });
+                  }}
+                  aria-label={`Edit alarm ${a.label}`}
+                  className="focus-ring text-xs text-[var(--ink-faint)] hover:text-[var(--ink)] px-2 py-1"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => handleDelete(a.id!)}
                   aria-label={`Remove alarm ${a.label}`}
                   className="focus-ring text-xs text-[var(--ink-faint)] hover:text-rose-500 px-2 py-1"
                 >

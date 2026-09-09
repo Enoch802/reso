@@ -6,10 +6,11 @@ import { db, getMeta, setMeta, migrateTopicStatuses, DailyPlanItem, Exam, Timeta
 import { todayStr, yesterdayStr, addDays, daysBetween, weekStartOnOrBefore, fmtMoney } from "@/lib/dates";
 import { Modal, NeoCheck, NeoButton, Field } from "./ui";
 import { fetchRankedEmails } from "@/lib/ai";
-import { pullYesterdayScreenTime } from "@/lib/screentime";
+import { pullYesterdayScreenTime, screenTimeAvailable, screenTimePermission } from "@/lib/screentime";
+import { getScreenTimeEnabled, setScreenTimeEnabled } from "@/lib/db";
 import { BellRing } from "lucide-react";
 import Nav from "./Nav";
-import { primeAudio, startAlarm, stopAlarm, onAlarmChange, RingState, syncNativeAlarms } from "@/lib/alarm";
+import { primeAudio, startAlarm, stopAlarm, onAlarmChange, RingState, syncNativeAlarms, scheduleNativeIfRunning } from "@/lib/alarm";
 
 /* ---------------- Live "today" — re-renders the whole app at midnight ---------------- */
 const TodayCtx = createContext<string>(todayStr());
@@ -164,6 +165,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return () => { off(); };
   }, []);
 
+  // Sync native alarms on app startup when running on Android native build
+  useEffect(() => {
+    const initNativeAlarms = async () => {
+      const alarms = await db.alarms.toArray();
+      const nativeAlarms = alarms.map((a) => ({
+        id: a.id!,
+        label: a.label,
+        time: a.time,
+        enabled: a.enabled === 1 ? 1 : 0,
+      }));
+      await scheduleNativeIfRunning(nativeAlarms);
+    };
+    initNativeAlarms();
+  }, []);
+
   // Alarm clock: every 15s, check for due named alarms. Rings with snooze/stop.
   useEffect(() => {
     const tick = async () => {
@@ -191,6 +207,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           return;
         }
       }
+      // Sync native alarms when running on Android native build
+      const alarms = await db.alarms.toArray();
+      const nativeAlarms = alarms.map((a) => ({
+        id: a.id!,
+        label: a.label,
+        time: a.time,
+        enabled: a.enabled === 1 ? 1 : 0,
+      }));
+      await scheduleNativeIfRunning(nativeAlarms);
     };
     const iv = setInterval(tick, 15000);
     void tick();
@@ -349,6 +374,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       }
     })();
   }, [today]);
+
+  // Screen time sync on app open — conditional on enabled state.
+  useEffect(() => {
+    (async () => {
+      const enabled = await getScreenTimeEnabled();
+      if (enabled !== 1) return;
+      if (!screenTimeAvailable()) return;
+      const perm = await screenTimePermission();
+      if (perm !== "granted") return;
+      await pullYesterdayScreenTime().catch(() => null);
+    })();
+  }, []);
 
   // Semester end: surface the recap once the semester has closed.
   const semesterOver = useMemo(() => {

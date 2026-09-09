@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import { ScrollText, Sparkles, Loader2, Award } from "lucide-react";
-import { db } from "@/lib/db";
+import { db, getScreenTimeEnabled } from "@/lib/db";
 import { GlassCard, SectionHeader, NeoButton, EmptyState } from "@/components/ui";
 import Recap from "@/components/Recap";
 import { routineStreak } from "@/lib/calc";
@@ -58,18 +58,25 @@ export default function DigestPage() {
       const sickDays = (dailyLogs ?? []).filter((l) => l.mood_state === "sick" && l.date >= thisWeekStart).length;
       const saved = Math.max(0, ((fs ?? [])[0]?.current_allowance_amount ?? 0) - (expenses ?? []).filter((e) => e.date >= thisWeekStart).reduce((a, e) => a + e.amount, 0));
 
+      const screenTimeEnabled = await getScreenTimeEnabled();
+
       const weekLogs = (dailyLogs ?? []).filter((l) => l.date >= thisWeekStart);
-      const st = weekLogs.filter((l) => typeof l.screen_time_minutes === "number");
-      const avgScreenTimeMinutes = st.length ? st.reduce((a, l) => a + (l.screen_time_minutes ?? 0), 0) / st.length : null;
       const sh = weekLogs.filter((l) => l.parsed_study_hours != null);
       const avgStudyHours = sh.length ? sh.reduce((a, l) => a + (l.parsed_study_hours ?? 0), 0) / sh.length : null;
 
-      const { digest } = await aiDigest({
+      const aiInput: any = {
         wantLeak, bestStreak: best && best.streak > 0 ? best : null,
         academicNote, sickDays, planCompletion,
         savings: saved, savingsTarget: (fs ?? [])[0]?.weekly_savings_target ?? 0,
-        avgScreenTimeMinutes, avgStudyHours,
-      });
+        avgStudyHours,
+      };
+
+      if (screenTimeEnabled === 1) {
+        const st = weekLogs.filter((l) => typeof l.screen_time_minutes === "number");
+        aiInput.avgScreenTimeMinutes = st.length ? st.reduce((a, l) => a + (l.screen_time_minutes ?? 0), 0) / st.length : null;
+      }
+
+      const { digest } = await aiDigest(aiInput);
       await db.weekly_digests.add({ week_start_date: thisWeekStart, digest_text: digest, created_at: Date.now() });
     } catch {
       setError("The writer couldn't be reached just now. Nothing was lost — try again in a moment.");

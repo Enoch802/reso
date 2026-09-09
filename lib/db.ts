@@ -268,6 +268,7 @@ class ResoDB extends Dexie {
   routine_logs!: Table<RoutineLog, number>;
   daily_plan_items!: Table<DailyPlanItem, number>;
   daily_logs!: Table<DailyLog, number>;
+  screentime_tracking!: Table<ScreentimeTracking, number>;
   chat_messages!: Table<ChatMessage, number>;
   discipline_scores!: Table<DisciplineScore, number>;
   weekly_digests!: Table<WeeklyDigest, number>;
@@ -298,7 +299,8 @@ class ResoDB extends Dexie {
       routines: "++id",
       routine_logs: "++id, routine_id, date",
       daily_plan_items: "++id, date, checked",
-      daily_logs: "++id, date",
+      daily_logs: "++id, date, screen_time_minutes, screen_time_top_app",
+      screentime_tracking: "++id",
       chat_messages: "++id, date, timestamp",
       discipline_scores: "++id, date",
       weekly_digests: "++id, week_start_date",
@@ -332,6 +334,17 @@ export async function getMeta(key: string): Promise<string | null> {
 
 export async function setMeta(key: string, value: string) {
   await db.meta.put({ key, value });
+}
+
+/** Get the screen time tracking enabled state (default: OFF). */
+export async function getScreenTimeEnabled(): Promise<0 | 1> {
+  const row = await db.screentime_tracking.get(0); // single row, id=0
+  return row?.enabled ?? 0;
+}
+
+/** Set the screen time tracking enabled state. */
+export async function setScreenTimeEnabled(enabled: 0 | 1) {
+  await db.screentime_tracking.put({ id: 0, enabled });
 }
 
 export async function getProfile(): Promise<Profile | undefined> {
