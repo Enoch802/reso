@@ -4,28 +4,32 @@ import android.app.AppOpsManager
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.os.Process
 import android.provider.Settings
+import android.util.Base64
+import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
+import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
-import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
 
 /**
- * ScreenTime — a small native bridge over Android's UsageStatsManager.
+ * ScreenTime — native bridge over Android's UsageStatsManager.
  *
- * Web side (lib/screentime.ts) calls this plugin as window.Capacitor.Plugins.ScreenTime:
  *   checkPermission()            -> { granted: boolean }
- *   openPermissionSettings()     -> void   (deep-links to usage access settings)
- *   getScreenTimeMinutes({date}) -> { minutes: number | null, top_app: string | null }
- *
- * Permission: PACKAGE_USAGE_STATS (usage access) — granted by the user once,
- * through the system screen this plugin deep-links to. Read-only, on-device.
+ *   openPermissionSettings()     -> void
+ *   getScreenTimeMinutes({date, limit?}) -> {
+ *     minutes: number | null,     // total across ALL apps
+ *     top_app: string | null,
+ *     apps: [{ package, app_name, minutes, icon }]  // heaviest first, icons as base64 PNG
+ *   }
  */
 @CapacitorPlugin(name = "ScreenTime")
 class ScreenTimePlugin : Plugin() {
@@ -38,6 +42,21 @@ class ScreenTimePlugin : Plugin() {
             context.packageName
         )
         return mode == AppOpsManager.MODE_ALLOWED
+    }
+
+    /** App icon as a downscaled base64 PNG, so the web side gets logos without file access. */
+    private fun encodeIcon(pkg: String, size: Int = 96): String? = try {
+        val d = context.packageManager.getApplicationIcon(pkg)
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        d.setBounds(0, 0, size, size)
+        d.draw(c)
+        val out = ByteArrayOutputStream()
+        bmp.compress(Bitmap.CompressFormat.PNG, 90, out)
+        bmp.recycle()
+        Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+    } catch (e: Exception) {
+        null
     }
 
     @PluginMethod
@@ -57,10 +76,14 @@ class ScreenTimePlugin : Plugin() {
 
     @PluginMethod
     fun getScreenTimeMinutes(call: PluginCall) {
+        val empty = JSObject().apply {
+            put("minutes", null)
+            put("top_app", null)
+            put("apps", JSArray())
+        }
+
         if (!hasUsageAccess()) {
-            val ret = JSObject()
-            ret.put("minutes", null)
-            call.resolve(ret)
+            call.resolve(empty)
             return
         }
         val dateStr = call.getString("date") ?: run {
@@ -81,36 +104,44 @@ class ScreenTimePlugin : Plugin() {
                 dayEnd + 60_000L
             )
 
-            // Sum real foreground time from buckets overlapping the requested day,
-            // de-duplicated by app package across overlapping query buckets.
+            // Real foreground time, de-duplicated by package across overlapping buckets.
             val seen = mutableMapOf<String, Long>()
             for (s in stats) {
-                // Skip buckets that don't overlap the day. <=/>= so a bucket that
-                // merely touches midnight (e.g. the next day's bucket pulled in by
-                // the ±60s query padding) can't leak its time into this day.
                 if (s.lastTimeStamp <= dayStart || s.firstTimeStamp >= dayEnd) continue
                 val pkg = s.packageName
-                // totalTimeInForeground is actual accumulated foreground usage;
-                // firstTimeStamp..lastTimeStamp is only the bucket's coverage range.
                 val fg = s.totalTimeInForeground
                 if (fg <= 0L) continue
-                // keep the largest reported value per package to avoid double counting
-                // across overlapping query buckets
                 if (fg > (seen[pkg] ?: 0L)) seen[pkg] = fg
             }
             val totalMs = seen.values.sum()
-            // The single app that took the most of the day's time.
             val topApp = seen.maxByOrNull { it.value }?.key
 
+            val limit = call.getInt("limit") ?: 0
+            val pm = context.packageManager
+            val apps = JSArray()
+            val sorted = seen.entries.sortedByDescending { it.value }
+            val shown = if (limit > 0) sorted.take(limit) else sorted
+            shown.forEach { (pkg, ms) ->
+                val label = try {
+                    pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+                } catch (e: Exception) {
+                    pkg
+                }
+                val o = JSObject()
+                o.put("package", pkg)
+                o.put("app_name", label)
+                o.put("minutes", (ms / 60_000.0).toInt())
+                o.put("icon", encodeIcon(pkg))
+                apps.put(o)
+            }
+
             val ret = JSObject()
-            // Report null for days with no data (future dates, fresh installs).
             ret.put("minutes", if (totalMs > 0) (totalMs / 60_000.0).toInt() else null)
             ret.put("top_app", topApp)
+            ret.put("apps", apps)
             call.resolve(ret)
         } catch (e: Exception) {
-            val ret = JSObject()
-            ret.put("minutes", null)
-            call.resolve(ret)
+            call.resolve(empty)
         }
     }
 }
