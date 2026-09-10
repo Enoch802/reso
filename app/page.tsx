@@ -1,625 +1,378 @@
 "use client";
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ChevronRight, Check, Mic } from "lucide-react";
+import { useLiveQuery } from "dexie-react-hooks";
+import {
+  BookOpenCheck, Wallet2, Repeat2, ArrowRight, Mail, MoonStar, AlarmClock, TrendingUp, ReceiptText,
+} from "lucide-react";
+import { db } from "@/lib/db";
+import { GlassCard, SectionHeader, NeoButton } from "@/components/ui";
+import Ring from "@/components/Ring";
+import Checklist from "@/components/Checklist";
+import ScreenTimeCard from "@/components/ScreenTimeCard";
+import { useToday } from "@/components/AppShell";
+import {
+  academicScore, financeScore, routineScore, isSickDay,
+  daysUntilExam, examCountdownText,
+} from "@/lib/calc";
+import { fmtMoney, longDate, prettyDate, addDays, DAY_SHORT } from "@/lib/dates";
 
-/* Photography: Covenant University (Nigeria), Harvard University, and graduation moments */
-const PH = {
-  hero: "https://upload.wikimedia.org/wikipedia/commons/7/7e/Covenant_University_Campus_View.jpg",
-  study: "https://upload.wikimedia.org/wikipedia/commons/0/0e/HarvardYard.jpg",
-  market: "https://upload.wikimedia.org/wikipedia/commons/5/53/Covenant_University_Senate_Building.jpg",
-  walk: "https://images.unsplash.com/photo-1523580494863-6f3031224c94?auto=format&fit=crop&w=1600&q=80",
-  desk: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4f/Harvard_Yard_at_Night_03.jpg/1920px-Harvard_Yard_at_Night_03.jpg",
-  building: "https://upload.wikimedia.org/wikipedia/commons/thumb/5/51/Massachusetts_Hall%2C_Harvard_University.JPG/1920px-Massachusetts_Hall%2C_Harvard_University.JPG",
-};
+export default function DashboardPage() {
+  const today = useToday();
 
-const cv = (v: Record<string, string | number>) => v as CSSProperties;
+  const profile = useLiveQuery(() => db.profile.toArray(), []);
+  const planItems = useLiveQuery(() => db.daily_plan_items.where("date").equals(today).toArray(), [today]);
+  const expenses = useLiveQuery(() => db.expenses.where("date").equals(today).toArray(), [today]);
+  const routines = useLiveQuery(() => db.routines.toArray(), []);
+  const routineLogs = useLiveQuery(() => db.routine_logs.where("date").equals(today).toArray(), [today]);
+  const dailyLog = useLiveQuery(() => db.daily_logs.where("date").equals(today).toArray(), [today]);
+  const fs = useLiveQuery(() => db.finance_settings.toArray(), []);
+  const courses = useLiveQuery(() => db.courses.toArray(), []);
+  const exams = useLiveQuery(() => db.exams.toArray(), []);
+  const financeWeeks = useLiveQuery(() => db.finance_weeks.toArray(), []);
+  const emailItems = useLiveQuery(
+    () => db.email_items.where("fetched_date").equals(today).toArray(),
+    [today]
+  );
+  const weekScores = useLiveQuery(() => db.discipline_scores.toArray(), []);
+  const expensesAll = useLiveQuery(() => db.expenses.toArray(), []);
 
-function Landing() {
-  const [heroIn, setHeroIn] = useState(false);
-  const heroRef = useRef<HTMLElement>(null);
-  const barRef = useRef<HTMLDivElement>(null);
+  const name = profile?.[0]?.name?.split(" ")[0] ?? "friend";
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
+  const sick = isSickDay(dailyLog ?? [], today);
+
+  const pillars = useMemo(() => {
+    const a = academicScore(planItems ?? []);
+    const f = sick ? null : financeScore(expenses ?? [], fs?.[0]?.daily_spending_target ?? 0);
+    const r = routineScore(routines ?? [], routineLogs ?? [], today);
+    const vals = [a, f, r].filter((v): v is number => v != null);
+    const overall = vals.length ? vals.reduce((x, y) => x + y, 0) / vals.length : 0;
+    return { a, f, r, overall };
+  }, [planItems, expenses, routines, routineLogs, fs, sick, today]);
+
+  // Persist today's discipline snapshot (patterns, not single days).
   useEffect(() => {
-    const id = requestAnimationFrame(() => requestAnimationFrame(() => setHeroIn(true)));
-    return () => cancelAnimationFrame(id);
-  }, []);
+    if (!planItems || !planItems.length) return;
+    (async () => {
+      const existing = await db.discipline_scores.where("date").equals(today).toArray();
+      const payload = {
+        academic_score: pillars.a,
+        finance_score: pillars.f,
+        routine_score: pillars.r,
+        overall_score: pillars.overall,
+      };
+      if (existing[0]) await db.discipline_scores.update(existing[0].id!, payload);
+      else await db.discipline_scores.add({ date: today, ...payload });
+    })();
+  }, [planItems, pillars.a, pillars.f, pillars.r, pillars.overall, today]);
 
-  useEffect(() => {
-    const els = Array.from(document.querySelectorAll(".rv"));
-    const io = new IntersectionObserver(
-      (entries) => {
-        for (const en of entries) {
-          if (en.isIntersecting) {
-            en.target.classList.add("in");
-            io.unobserve(en.target);
-          }
-        }
-      },
-      { threshold: 0.14 }
+
+  const balance = useMemo(() => {
+    if (!financeWeeks?.length || !expensesAll) return null;
+    const week = financeWeeks[financeWeeks.length - 1];
+    const spent = expensesAll.filter((e) => e.finance_week_id === week.id).reduce((a, e) => a + e.amount, 0);
+    return { balance: week.opening_balance - spent, week };
+  }, [financeWeeks, expensesAll]);
+
+  const nextExam = useMemo(() => {
+    if (!exams?.length || !courses) return null;
+    const upcoming = exams
+      .map((ex) => ({ ex, course: courses.find((c) => c.id === ex.course_id), days: daysUntilExam(ex.exam_date) }))
+      .filter((x) => x.course && x.days >= 0)
+      .sort((a, b) => a.days - b.days);
+    return upcoming[0] ?? null;
+  }, [exams, courses]);
+
+  const weekStrip = useMemo(() => {
+    if (!weekScores) return [];
+    const todayDay = new Date(today + "T00:00:00").getDay();
+    const dayOfWeekMap: { [key: string]: string } = { 0: "S", 1: "M", 2: "T", 3: "W", 4: "T", 5: "F", 6: "S" };
+    return Array.from({ length: 7 }).map((_, i) => {
+      const d = addDays(today, i - 6);
+      const row = weekScores.find((s) => s.date === d);
+      return { date: d, day: dayOfWeekMap[new Date(d + "T00:00:00").getDay()], score: row?.overall_score };
+    });
+  }, [weekScores, today]);
+
+  const routinesToday = useMemo(() => {
+    const todayDay = new Date(today + "T00:00:00").getDay();
+    return (routines ?? []).filter((r) => r.schedule_days.includes(todayDay));
+  }, [routines, today]);
+
+  const routinesDone = useMemo(() => {
+    return routinesToday.filter((r) =>
+      (routineLogs ?? []).some((l) => l.routine_id === r.id && l.status === "done")
     );
-    els.forEach((el) => io.observe(el));
-    return () => io.disconnect();
-  }, []);
+  }, [routinesToday, routineLogs]);
 
-  useEffect(() => {
-    let raf = 0;
-    const onScroll = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        const h = document.documentElement;
-        const p = h.scrollTop / Math.max(1, h.scrollHeight - h.clientHeight);
-        if (barRef.current) barRef.current.style.transform = `scaleX(${p})`;
-      });
-    };
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      window.removeEventListener("scroll", onScroll);
-      cancelAnimationFrame(raf);
-    };
-  }, []);
+  const important = useMemo(() => {
+    return (emailItems ?? []).filter((e) => e.rank === "important");
+  }, [emailItems]);
 
-  const onMove = (e: ReactMouseEvent) => {
-    const el = heroRef.current;
-    if (!el || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const r = el.getBoundingClientRect();
-    el.style.setProperty("--px", String(((e.clientX - r.left) / r.width - 0.5) * 2));
-    el.style.setProperty("--py", String(((e.clientY - r.top) / r.height - 0.5) * 2));
+  const reflected = useMemo(() => {
+    return (dailyLog ?? []).some((l) => l.evening_reflection_text?.trim());
+  }, [dailyLog]);
+
+  const planDone = useMemo(() => {
+    return (planItems ?? []).filter((i) => i.checked).length;
+  }, [planItems]);
+
+  const planTotal = planItems?.length ?? 0;
+
+  return (
+    <div className="space-y-6">
+      {/* Greeting */}
+      <div className="animate-fade-up">
+        <p className="text-sm text-[var(--ink-faint)]">{longDate(new Date())}</p>
+        <h1 className="font-serif text-3xl sm:text-4xl tracking-tight text-[var(--ink)] mt-1">
+          {greeting}, {name}.
+        </h1>
+        <p className="text-[var(--ink-soft)] mt-1.5 text-[15px]">
+          {sick
+            ? "You're under the weather today — nothing counts against you. Rest well."
+            : planTotal === 0
+              ? "The day is unwritten. A short plan goes a long way."
+              : planDone === planTotal
+                ? "Everything on today's plan is done. That's the whole game."
+                : `${planDone} of ${planTotal} done so far. Steady.`}
+        </p>
+      </div>
+
+      {/* Exam countdown banner */}
+      {nextExam && nextExam.days <= 21 && (
+        <Link href="/academics" className="focus-ring block animate-fade-up [animation-delay:100ms]">
+          <GlassCard className="p-4 sm:p-5 flex items-center gap-4 hover:-translate-y-0.5 transition-transform">
+            <span className="neo-sm w-11 h-11 rounded-xl flex items-center justify-center text-[var(--accent)] shrink-0" aria-hidden>
+              <AlarmClock size={20} />
+            </span>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-[var(--ink)]">
+                {nextExam.course!.code} exam {examCountdownText(nextExam.days)}
+              </p>
+              <p className="text-sm text-[var(--ink-soft)] truncate">
+                {prettyDate(nextExam.ex.exam_date)}
+                {nextExam.ex.start_time ? ` at ${nextExam.ex.start_time}` : ""}
+                {nextExam.ex.venue ? ` — ${nextExam.ex.venue}` : ""}
+              </p>
+            </div>
+            <ArrowRight size={18} className="text-[var(--ink-faint)]" aria-hidden />
+          </GlassCard>
+        </Link>
+      )}
+
+      {/* Hero: ring + daily measures */}
+      <GlassCard strong className="p-6 sm:p-8 animate-fade-up [animation-delay:150ms]">
+        <div className="flex flex-col sm:flex-row items-center gap-8 sm:gap-12">
+          <div>
+            {sick
+              ? <Ring percent={0} label="Rest day" sublabel="not scored" />
+              : <Ring percent={pillars.overall} label="Discipline" sublabel="today" />}
+          </div>
+          <div className="flex-1 w-full space-y-3">
+            <PillarRow
+              icon={<BookOpenCheck size={17} aria-hidden />} name="Today's Plan"
+              value={pillars.a} detail={planTotal ? `${planDone}/${planTotal} done` : "no plan yet"}
+            />
+            <PillarRow
+              icon={<Wallet2 size={17} aria-hidden />} name="Finance"
+              value={pillars.f} detail={sick ? "rest day — not scored" : expenses?.length ? `${expenses.length} expense${expenses.length > 1 ? "s" : ""} logged` : "nothing spent yet"}
+            />
+            <PillarRow
+              icon={<Repeat2 size={17} aria-hidden />} name="Routines"
+              value={pillars.r} detail={routinesToday.length ? `${routinesDone.length}/${routinesToday.length} done today` : "nothing scheduled today"}
+            />
+          </div>
+        </div>
+      </GlassCard>
+
+      {/* Stat cards */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 animate-fade-up [animation-delay:220ms]">
+        <TopicsStatCard />
+        <GlassCard className="p-5">
+          <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ink-faint)] flex items-center gap-1.5"><Wallet2 size={12} aria-hidden /> Balance</p>
+          <p className="font-serif text-3xl mt-2 text-[var(--ink)]">{balance ? fmtMoney(balance.balance) : "—"}</p>
+          <p className="text-xs text-[var(--ink-soft)] mt-1">{balance ? `week of ${prettyDate(balance.week.week_start_date)}` : "no week open"}</p>
+        </GlassCard>
+        <GlassCard className="p-5 col-span-2 lg:col-span-1">
+          <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ink-faint)] flex items-center gap-1.5"><Repeat2 size={12} aria-hidden /> Today's routines</p>
+          <p className="font-serif text-3xl mt-2 text-[var(--ink)]">{routinesDone.length}<span className="text-lg text-[var(--ink-faint)]">/{routinesToday.length}</span></p>
+          <p className="text-xs text-[var(--ink-soft)] mt-1">{routinesToday.length ? "keep the streaks alive" : "a restful day"}</p>
+        </GlassCard>
+      </div>
+
+      {/* Screen time (Android, optional — hides itself when tracking is off) */}
+      <ScreenTimeCard />
+
+      {/* Checklist preview */}
+      <div className="animate-fade-up [animation-delay:280ms]">
+        <SectionHeader icon={<BookOpenCheck size={20} aria-hidden />} title="Today's Plan" sub="Tick them off as you go — each check counts." />
+        <GlassCard className="p-5">
+          <Checklist compact />
+        </GlassCard>
+      </div>
+
+      {/* 9pm spending check-in */}
+      {hour >= 21 && (expenses ?? []).length === 0 && (
+        <SpendCheckIn today={today} />
+      )}
+
+      {/* Email strip */}
+      <div className="animate-fade-up [animation-delay:340ms]">
+        <Link href="/inbox" className="focus-ring block">
+          <GlassCard className="p-5 hover:-translate-y-0.5 transition-transform">
+            <div className="flex items-center gap-4">
+              <span className="neo-sm w-11 h-11 rounded-xl flex items-center justify-center text-[var(--accent)]" aria-hidden><Mail size={19} /></span>
+              <div className="flex-1 min-w-0">
+                {emailItems == null ? (
+                  <p className="text-sm text-[var(--ink-soft)]">Checking today's mail…</p>
+                ) : emailItems.length === 0 ? (
+                  <>
+                    <p className="font-semibold text-[var(--ink)]">Your inbox, triaged</p>
+                    <p className="text-sm text-[var(--ink-soft)]">Connect a Gmail account and Reso will boil each day's mail down to what matters. Optional, always.</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-semibold text-[var(--ink)]">{important.length} need${important.length === 1 ? "s" : ""} your attention today</p>
+                    <p className="text-sm text-[var(--ink-soft)] truncate">
+                      {important[0] ? `${important[0].summary || important[0].subject}` : "nothing urgent — the rest can wait"}
+                    </p>
+                  </>
+                )}
+              </div>
+              <ArrowRight size={18} className="text-[var(--ink-faint)]" aria-hidden />
+            </div>
+          </GlassCard>
+        </Link>
+      </div>
+
+      {/* Evening reflection prompt */}
+      {!reflected && hour >= 17 && (
+        <Link href="/journal" className="focus-ring block animate-fade-up [animation-delay:400ms]">
+          <GlassCard className="p-5 hover:-translate-y-0.5 transition-transform">
+            <div className="flex items-center gap-4">
+              <span className="neo-sm w-11 h-11 rounded-xl flex items-center justify-center text-[var(--accent)]" aria-hidden><MoonStar size={19} /></span>
+              <div className="flex-1">
+                <p className="font-semibold text-[var(--ink)]">How was today?</p>
+                <p className="text-sm text-[var(--ink-soft)]">Two lines in the journal is plenty — type or speak, whichever is easier.</p>
+              </div>
+              <ArrowRight size={18} className="text-[var(--ink-faint)]" aria-hidden />
+            </div>
+          </GlassCard>
+        </Link>
+      )}
+
+      {/* Week mini strip */}
+      <div className="animate-fade-up [animation-delay:460ms]">
+        <SectionHeader title="This week, at a glance" />
+        <GlassCard className="p-5">
+          <div className="flex justify-between gap-2">
+            {weekStrip.map((d) => (
+              <div key={d.date} className="flex flex-col items-center gap-2 flex-1">
+                <span className={`text-[10px] uppercase tracking-wide ${d.date === today ? "text-[var(--accent)] font-semibold" : "text-[var(--ink-faint)]"}`}>{d.day}</span>
+                <div
+                  title={d.score != null ? `${Math.round(d.score)}%` : "no data"}
+                  className={`w-full rounded-full ${d.date === today ? "ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-transparent" : ""}`}
+                  style={{
+                    height: 52,
+                    background:
+                      d.score == null
+                        ? "rgba(120,116,150,0.12)"
+                        : `linear-gradient(to top, var(--accent) ${d.score}%, rgba(120,116,150,0.12) ${d.score}%)`,
+                    opacity: d.score == null ? 0.7 : Math.max(0.35, d.score / 100),
+                  }}
+                  role="img"
+                  aria-label={`${d.day}: ${d.score != null ? Math.round(d.score) + " percent" : "no score"}`}
+                />
+              </div>
+            ))}
+          </div>
+        </GlassCard>
+      </div>
+    </div>
+  );
+}
+
+function PillarRow({ icon, name, value, detail }: { icon: React.ReactNode; name: string; value: number | null; detail: string }) {
+  return (
+    <div className="flex items-center gap-3">
+      <span className="text-[var(--ink-faint)] shrink-0" aria-hidden>{icon}</span>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-sm font-medium text-[var(--ink)]">{name}</span>
+          <span className="text-sm tabular-nums text-[var(--ink-soft)]">{value == null ? "—" : `${Math.round(value)}%`}</span>
+        </div>
+        <div className="h-1.5 rounded-full bg-black/[0.06] dark:bg-white/[0.07] mt-1 overflow-hidden">
+          <div
+            className="h-full rounded-full bg-[var(--accent)] transition-all duration-1000"
+            style={{ width: `${value ?? 0}%`, opacity: value == null ? 0 : 1 }}
+          />
+        </div>
+        <p className="text-xs text-[var(--ink-faint)] mt-1">{detail}</p>
+      </div>
+    </div>
+  );
+}
+
+/** Evening check-in: log the day's total spend; balance updates automatically. */
+function SpendCheckIn({ today }: { today: string }) {
+  const [amount, setAmount] = useState("");
+  const [done, setDone] = useState(false);
+  const weeks = useLiveQuery(() => db.finance_weeks.toArray(), []) ?? [];
+  const week = weeks[weeks.length - 1];
+
+  const log = async () => {
+    const amt = parseFloat(amount);
+    if (isNaN(amt) || amt <= 0 || !week?.id) return;
+    await db.expenses.add({ finance_week_id: week.id, date: today, amount: amt, tag: "need", note: "day total" });
+    setAmount("");
+    setDone(true);
   };
 
-  return (
-    <div className={heroIn ? "hero-in" : ""}>
-      {/* Scroll progress hairline */}
-      <div className="fixed inset-x-0 top-0 z-[100] h-[2px] bg-black/5">
-        <div ref={barRef} className="h-full w-full origin-left" style={{ transform: "scaleX(0)", background: "var(--ink)" }} />
-      </div>
-
-      {/* Nav */}
-      <header className="fixed inset-x-0 top-0 z-[90]">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-5 sm:px-6 py-4">
-          <div className="flex items-center gap-2.5">
-            <LogoMark size={30} />
-            <span className="font-serif text-xl font-semibold tracking-tight">Reso</span>
-          </div>
-          <Link href="/dashboard" className="glass-hair px-4 py-2 text-sm font-semibold hover:brightness-95" style={{ color: "var(--ink-soft)" }}>
-            Enter Reso
-          </Link>
-        </div>
-      </header>
-
-      {/* ---------- HERO ---------- */}
-      <section ref={heroRef} onMouseMove={onMove} className="relative flex min-h-screen items-end overflow-hidden">
-        <div className="absolute inset-0">
-          <img src={PH.hero} alt="Covenant University campus view" className="ph h-full w-full object-cover" />
-          <div
-            className="absolute inset-0"
-            style={{
-              background:
-                "linear-gradient(95deg, var(--page) 0%, color-mix(in srgb, var(--page) 94%, transparent) 24%, color-mix(in srgb, var(--page) 48%, transparent) 45%, transparent 63%)",
-            }}
-          />
-          <div className="absolute inset-0 lg:hidden" style={{ background: "color-mix(in srgb, var(--page) 80%, transparent)" }} />
-          <div className="absolute inset-x-0 bottom-0 h-44" style={{ background: "linear-gradient(to top, var(--page), transparent)" }} />
-        </div>
-
-        <div className="relative z-10 mx-auto grid w-full max-w-6xl items-end gap-12 px-5 sm:px-6 pb-24 pt-36 lg:grid-cols-12">
-          <div className="lg:col-span-6">
-            <div className="glass-hair inline-flex items-center gap-2 px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--ink-soft)" }}>
-              A personal companion · one student · one device
-            </div>
-            <h1 className="font-serif mt-6 text-[clamp(3rem,8.5vw,6.4rem)] font-semibold leading-[0.98] tracking-tight">
-              <Masked text="Your semester," start={100} />
-              <br />
-              <Masked text="kept honest." start={320} />
-            </h1>
-            <p className="rv in mt-6 max-w-md text-[15px] leading-relaxed" style={{ color: "var(--ink-soft)" }}>
-              Reso turns the three numbers you actually live by — your GPA pace, your allowance, your daily discipline — into one picture that updates as
-              your life moves, and reports back every week without flattery.
-            </p>
-            <div className="rv in mt-8 flex flex-wrap items-center gap-4">
-              <Link href="/dashboard" className="inline-flex items-center gap-2 rounded-xl bg-[var(--accent)] px-7 py-3.5 text-[15px] font-semibold text-[var(--accent-ink)] shadow-xl hover:brightness-110 transition">
-                Open Reso <ChevronRight size={17} />
-              </Link>
-              <span className="text-xs" style={{ color: "var(--ink-soft)" }}>
-                No account, ever. First-time setup takes a few minutes.
-              </span>
-            </div>
-          </div>
-
-          {/* Floating device mockup — the real overview screen, live */}
-          <div className="relative hidden h-[640px] lg:col-span-6 lg:flex items-center justify-center">
-            <div className="par relative" style={cv({ "--d": "22px" })}>
-              <div className="drift relative" style={cv({ "--dd": "0.6s" })}>
-                {/* Phone body */}
-                <div
-                  className="relative w-[300px] h-[632px] rounded-[3.2rem] p-[10px]"
-                  style={{
-                    background: "linear-gradient(160deg, #26262c 0%, #0c0c0f 60%, #1a1a1f 100%)",
-                    boxShadow: "0 60px 120px -40px rgba(10,10,15,0.65), 0 24px 48px -24px rgba(10,10,15,0.5), inset 0 1px 1px rgba(255,255,255,0.18), inset 0 -1px 1px rgba(255,255,255,0.06)",
-                  }}
-                >
-                  {/* Side buttons */}
-                  <span aria-hidden className="absolute -left-[2.5px] top-[120px] w-[3px] h-9 rounded-full bg-[#3a3a42]" />
-                  <span aria-hidden className="absolute -left-[2.5px] top-[170px] w-[3px] h-14 rounded-full bg-[#3a3a42]" />
-                  <span aria-hidden className="absolute -right-[2.5px] top-[150px] w-[3px] h-16 rounded-full bg-[#3a3a42]" />
-                  {/* Screen */}
-                  <div className="relative w-full h-full rounded-[2.7rem] overflow-hidden" style={{ background: "var(--page)" }}>
-                    {/* Dynamic island */}
-                    <span aria-hidden className="absolute left-1/2 -translate-x-1/2 top-2.5 z-10 w-[86px] h-[24px] rounded-full bg-[#0c0c0f]" />
-                    <iframe
-                      src="/preview"
-                      title="Reso overview preview"
-                      className="absolute top-0 left-0 border-0"
-                      style={{ width: 390, height: 844, transform: "scale(0.7179)", transformOrigin: "top left" }}
-                      loading="lazy"
-                    />
-                    {/* Glass reflection */}
-                    <span aria-hidden className="absolute inset-0 rounded-[2.7rem] pointer-events-none" style={{ background: "linear-gradient(125deg, rgba(255,255,255,0.16) 0%, transparent 28%, transparent 72%, rgba(255,255,255,0.05) 100%)" }} />
-                  </div>
-                </div>
-
-                {/* Floating proof chips around the device */}
-                <div className="par absolute -left-16 top-16" style={cv({ "--d": "34px" })}>
-                  <div className="drift" style={cv({ "--dd": "1.8s" })}>
-                    <span className="glass-hair px-3.5 py-2 text-[11px] font-bold" style={{ color: "var(--ink)" }}>
-                      Day 34 of 160
-                    </span>
-                  </div>
-                </div>
-                <div className="par absolute -right-10 top-[300px]" style={cv({ "--d": "12px" })}>
-                  <div className="drift" style={cv({ "--dd": "2.8s" })}>
-                    <span className="glass-hair px-3.5 py-2 text-[11px] font-bold" style={{ color: "var(--ink-soft)" }}>
-                      Discipline · 78%
-                    </span>
-                  </div>
-                </div>
-                <div className="par absolute -left-8 bottom-10" style={cv({ "--d": "18px" })}>
-                  <div className="drift" style={cv({ "--dd": "3.6s" })}>
-                    <span className="glass-hair px-3.5 py-2 text-[11px] font-bold" style={{ color: "var(--ink-soft)" }}>
-                      Savings target · made
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="absolute bottom-5 left-1/2 z-10 -translate-x-1/2">
-          <div className="scrollcue" />
-        </div>
-      </section>
-
-      {/* ---------- PILLARS ---------- */}
-      <section className="relative py-28 md:py-36">
-        <div className="mx-auto max-w-6xl px-5 sm:px-6">
-          <div className="rv mb-4 text-[11px] font-bold uppercase tracking-[0.2em]" style={{ color: "var(--ink-soft)" }}>
-            What it keeps honest
-          </div>
-          <h2 className="rv font-serif max-w-2xl text-4xl font-semibold leading-tight tracking-tight md:text-5xl" style={cv({ "--rvd": "80ms" })}>
-            Three numbers. One picture that moves with you.
-          </h2>
-
-          <Pillar
-            flip={false}
-            photo={PH.study}
-            alt="Harvard Yard"
-            index="01"
-            title="Academics, weighted the way your institution weighs you."
-            body="CA and exam share the grade exactly as your courses do — general and departmental structured differently, the way they are on your actual grade sheet. The math always answers the question that matters: what does the next assessment need to be?"
-            lines={[
-              ["Course-type aware", "CA, Test 1, Test 2, exam — each carries its real weight."],
-              ["Required-score math", "Per remaining assessment, against your GPA target."],
-              ["Exam outcomes as ranges", "Bands of possibility, never a fabricated prediction."],
-            ]}
-            overlay={
-              <div className="glass glass-spec rounded-2xl p-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--ink-faint)" }}>
-                    CSC141 · 2 units
-                  </span>
-                  <span className="rounded-full border border-[var(--glass-border)] px-2.5 py-0.5 text-[11px] font-semibold" style={{ color: "var(--ink-soft)" }}>exam 70%</span>
-                </div>
-                <div className="mt-2 font-serif text-2xl font-semibold">
-                  84.2% <span className="text-sm font-normal" style={{ color: "var(--ink-faint)" }}>→ B, holding</span>
-                </div>
-                <div className="mt-1 text-xs" style={{ color: "var(--ink-faint)" }}>
-                  Need 71.4% on the final to stay on the 4.50 pace.
-                </div>
-              </div>
-            }
-          />
-          <Pillar
-            flip
-            photo={PH.market}
-            alt="Covenant University senate building"
-            index="02"
-            title="Your allowance, told straight."
-            body="Each cycle opens on the day your money lands, carries forward whatever survived, and classifies every day against the number you actually meant to spend. At the end, the analysis is day by day — not a mood, an arithmetic."
-            lines={[
-              ["Cycles with honest rollover", "Unspent balance carries forward; it is never quietly lost."],
-              ["Want versus need", "Every expense named, and the biggest leak called out by category."],
-              ["End-of-cycle analysis", "Which days ran over, whether the savings target was met."],
-            ]}
-            overlay={
-              <div className="glass glass-spec rounded-2xl p-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--ink-faint)" }}>
-                    Cycle · week of the 3rd
-                  </span>
-                  <span className="rounded-full border border-[var(--glass-border)] px-2.5 py-0.5 text-[11px] font-semibold" style={{ color: "var(--ink-soft)" }}>savings met</span>
-                </div>
-                <div className="mt-3 flex items-center gap-1.5">
-                  {[1400, 3100, 4300, 2200, 5100, 1800, 0].map((v, i) => (
-                    <span key={i} className="h-8 flex-1 rounded-md" style={{ background: "var(--ink)", opacity: v > 4000 ? 1 : 0.28 }} />
-                  ))}
-                </div>
-                <div className="mt-2 text-xs" style={{ color: "var(--ink-faint)" }}>
-                  Saved 5,000 of 5,000. Two days ran over the daily target.
-                </div>
-              </div>
-            }
-          />
-          <Pillar
-            flip={false}
-            photo={PH.walk}
-            alt="University graduation celebration"
-            index="03"
-            title="Discipline as pattern, not as punishment."
-            body="One rough day is noise; a run of rough days is signal — so Reso scores days and weeks, not moments. A day you are sick is dropped from every number entirely, not counted as a failure. Unfinished plans are carried on purpose, never guilted."
-            lines={[
-              ["Daily reset, deliberate carryover", "Each day starts clean; open items ask before they follow you."],
-              ["Sick days fully excluded", "Out of the numerator and the denominator, everywhere."],
-              ["Routines that forgive", "Skipping is logged as honesty, and the streak is still counted."],
-            ]}
-            overlay={
-              <div className="glass glass-spec rounded-2xl p-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--ink-faint)" }}>
-                    Last 14 days
-                  </span>
-                  <span className="rounded-full border border-[var(--glass-border)] px-2.5 py-0.5 text-[11px] font-semibold" style={{ color: "var(--ink-soft)" }}>week 72%</span>
-                </div>
-                <div className="mt-3 flex items-end gap-1">
-                  {[62, 80, 45, 88, 100, 70, 0, 78, 92, 60, 84, 74, 0, 90].map((v, i) => (
-                    <span
-                      key={i}
-                      className="w-full rounded-t"
-                      style={{
-                        height: `${Math.max(8, v * 0.6)}px`,
-                        background: v === 0 ? "var(--ink-faint)" : "var(--ink)",
-                        opacity: v === 0 ? 0.35 : 0.9,
-                      }}
-                    />
-                  ))}
-                </div>
-                <div className="mt-2 text-xs" style={{ color: "var(--ink-faint)" }}>
-                  Two sick days, fully excluded. The dips are visible, and so is the shape.
-                </div>
-              </div>
-            }
-          />
-        </div>
-      </section>
-
-      {/* ---------- INTELLIGENCE (night chapter) ---------- */}
-      <section className="relative overflow-hidden">
-        <div className="absolute inset-0">
-          <img src={PH.desk} alt="Harvard Yard at night" className="h-full w-full object-cover" style={{ filter: "saturate(1.08) contrast(1.05) brightness(0.52)" }} />
-          <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(8,8,12,0.6) 0%, rgba(8,8,12,0.85) 55%, rgba(8,8,12,0.65) 100%)" }} />
-        </div>
-        <div className="relative z-10 mx-auto max-w-6xl px-5 sm:px-6 py-32 md:py-40">
-          <div className="rv text-[11px] font-bold uppercase tracking-[0.2em] text-white/50">The intelligence layer</div>
-          <h2 className="rv font-serif mt-4 max-w-2xl text-4xl font-semibold leading-tight tracking-tight text-white md:text-5xl" style={cv({ "--rvd": "80ms" })}>
-            It remembers what you said.
-          </h2>
-          <p className="rv mt-5 max-w-xl text-[15px] leading-relaxed text-white/60" style={cv({ "--rvd": "160ms" })}>
-            A journal that reads your words — typed or spoken — holds things open until they resolve, and reports the week back without flattery.
-          </p>
-
-          <div className="mt-14 grid gap-10 lg:grid-cols-12">
-            <div className="lg:col-span-7">
-              <div className="rv glass-dark glass-spec rounded-3xl p-6 md:p-7">
-                <TypedJournal />
-              </div>
-            </div>
-            <div className="lg:col-span-5">
-              {[
-                ["Speaks and listens", "Voice input in the journal. What you say is what gets typed — no different downstream."],
-                ["Holds things open", "A test mentioned on a Monday and its score on Thursday resolve into one record, not two."],
-                ["Refuses fake precision", "Exam results are unknowable now, so Reso shows bands of what could happen — and says so."],
-                ["Reports weekly", "One honest digest: the trend, the leak, the streak, the course to work, and a question to sit with."],
-              ].map(([t, d], i) => (
-                <div key={t} className="rv border-t py-5 first:border-t-0" style={{ borderColor: "rgba(255,255,255,0.14)", ...cv({ "--rvd": `${i * 90}ms` }) }}>
-                  <div className="font-serif text-lg font-semibold text-white">{t}</div>
-                  <div className="mt-1.5 max-w-sm text-sm leading-relaxed text-white/55">{d}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ---------- PRIVACY ---------- */}
-      <section className="relative overflow-hidden py-32 md:py-40">
-        <div className="absolute inset-0">
-          <img src={PH.building} alt="Massachusetts Hall, Harvard University" className="ph h-full w-full object-cover" />
-          <div
-            className="absolute inset-0"
-            style={{
-              background:
-                "linear-gradient(180deg, var(--page) 0%, color-mix(in srgb, var(--page) 62%, transparent) 28%, color-mix(in srgb, var(--page) 62%, transparent) 72%, var(--page) 100%)",
-            }}
-          />
-        </div>
-        <div className="relative z-10 mx-auto max-w-3xl px-5 sm:px-6">
-          <div className="relative">
-            <div className="glass absolute inset-x-10 -bottom-5 top-10 -rotate-2 opacity-60" aria-hidden />
-            <div className="glass absolute inset-x-4 -bottom-2.5 top-5 rotate-1 opacity-75" aria-hidden />
-            <div className="rv glass glass-strong glass-edge glass-spec relative rounded-3xl p-8 md:p-11">
-              <div className="text-[11px] font-bold uppercase tracking-[0.2em]" style={{ color: "var(--ink-soft)" }}>
-                Private by construction
-              </div>
-              <h2 className="font-serif mt-4 text-4xl font-semibold leading-tight tracking-tight md:text-[2.9rem]">
-                One person. One device. No account.
-              </h2>
-              <p className="mt-5 max-w-lg text-[15px] leading-relaxed" style={{ color: "var(--ink-soft)" }}>
-                Everything you write — scores, spending, moods, the journal — is stored on this device, in structured local storage. There is no
-                server-side copy of your life, because there is no server-side you.
-              </p>
-              <div className="mt-7 space-y-0">
-                {[
-                  ["No login, no password, no multi-user", "Separation comes from the device, not from an account system."],
-                  ["Stateless intelligence", "The AI reads the words it is given for one request, holds nothing, and forgets on the way out."],
-                  ["One honest backup", "Export the entire store to a file whenever you like. That file is the backup."],
-                ].map(([t, d]) => (
-                  <div key={t} className="flex flex-col gap-1 border-t py-4 sm:flex-row sm:items-baseline sm:gap-6" style={{ borderColor: "var(--glass-border)" }}>
-                    <div className="w-56 shrink-0 font-semibold text-sm">{t}</div>
-                    <div className="text-sm leading-relaxed" style={{ color: "var(--ink-soft)" }}>
-                      {d}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-          <p className="rv mt-8 text-center text-xs" style={{ color: "var(--ink-soft)" }}>
-            Shaped around a Nigerian university semester — CA and exam weighting, Naira allowance cycles — without being chained to it.
-          </p>
-        </div>
-      </section>
-
-      {/* ---------- CLOSING ---------- */}
-      <section className="px-5 sm:px-6 py-36 text-center md:py-44">
-        <h2 className="rv font-serif mx-auto max-w-3xl text-[clamp(2.6rem,7vw,5.2rem)] font-semibold leading-[1.02] tracking-tight">
-          <Masked text="It will never flatter you." centered />
-        </h2>
-        <p className="rv mx-auto mt-6 max-w-md text-[15px] leading-relaxed" style={{ color: "var(--ink-soft)", ...cv({ "--rvd": "120ms" }) }}>
-          That is the whole point. When it says you are on pace, you are on pace. When it says otherwise, it will say how to get back.
-        </p>
-        <div className="rv mt-10" style={cv({ "--rvd": "200ms" })}>
-          <Link href="/dashboard" className="inline-flex items-center gap-2 rounded-xl bg-[var(--accent)] px-8 py-4 text-base font-semibold text-[var(--accent-ink)] shadow-xl hover:brightness-110 transition">
-            Open Reso <ChevronRight size={18} />
-          </Link>
-          <div className="mt-3 text-xs" style={{ color: "var(--ink-soft)" }}>
-            First time through? A short setup walks your semester in.
-          </div>
-        </div>
-      </section>
-
-      <footer className="border-t px-5 sm:px-6 py-8" style={{ borderColor: "var(--r-line)" }}>
-        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-2 text-xs sm:flex-row" style={{ color: "var(--ink-soft)" }}>
-          <span>Reso — a personal companion for one student, on one device.</span>
-          <span>Your data never leaves your device</span>
-        </div>
-      </footer>
-    </div>
-  );
-}
-
-function LogoMark({ size = 30 }: { size?: number }) {
-  return (
-    <span
-      className="inline-flex items-center justify-center rounded-xl font-serif font-semibold"
-      style={{ width: size, height: size, background: "var(--ink)", color: "var(--page)", fontSize: size * 0.55 }}
-      aria-hidden
-    >
-      R
-    </span>
-  );
-}
-
-function Masked({ text, start = 0, centered }: { text: string; start?: number; centered?: boolean }) {
-  return (
-    <span className={centered ? "block" : undefined}>
-      {text.split(" ").map((w, i) => (
-        <span key={i} className="wm">
-          <span style={cv({ "--d": `${start + i * 60}ms` })}>{w}&nbsp;</span>
-        </span>
-      ))}
-    </span>
-  );
-}
-
-function Pillar({
-  flip, photo, alt, index, title, body, lines, overlay,
-}: {
-  flip: boolean; photo: string; alt: string; index: string; title: string; body: string;
-  lines: [string, string][]; overlay: ReactNode;
-}) {
-  return (
-    <div className="grid items-center gap-10 border-t py-16 md:py-20 lg:grid-cols-12 lg:gap-14" style={{ borderColor: "var(--r-line)" }}>
-      <div className={`rv relative lg:col-span-7 ${flip ? "lg:order-2" : ""}`}>
-        <div className="glass p-2.5" style={{ borderRadius: 22 }}>
-          <div className="relative overflow-hidden rounded-[14px]" style={{ aspectRatio: "4 / 3" }}>
-            <img src={photo} alt={alt} className="ph kenburns h-full w-full object-cover" />
-            <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(8,8,12,0.35), transparent 45%)" }} />
-          </div>
-        </div>
-        <div className="rv absolute -bottom-8 left-5 right-5 sm:left-8 sm:right-auto sm:w-[340px]" style={cv({ "--rvd": "140ms" })}>
-          {overlay}
-        </div>
-      </div>
-      <div className={`rv mt-10 lg:col-span-5 lg:mt-0 ${flip ? "lg:order-1" : ""}`} style={cv({ "--rvd": "100ms" })}>
-        <div className="font-serif text-sm font-semibold" style={{ color: "var(--ink-soft)" }}>
-          {index}
-        </div>
-        <h3 className="font-serif mt-3 text-[1.75rem] font-semibold leading-snug tracking-tight md:text-4xl">{title}</h3>
-        <p className="mt-4 text-[15px] leading-relaxed" style={{ color: "var(--ink-soft)" }}>
-          {body}
-        </p>
-        <div className="mt-7">
-          {lines.map(([t, d]) => (
-            <div key={t} className="border-t py-3.5" style={{ borderColor: "var(--r-line)" }}>
-              <div className="text-sm font-semibold">{t}</div>
-              <div className="mt-0.5 text-[13px]" style={{ color: "var(--ink-soft)" }}>
-                {d}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const SEQ: { t: "u" | "r" | "d"; x: string }[] = [
-  { t: "u", x: "Had an impromptu CSC141 test today. Don't know the score yet." },
-  { t: "r", x: "Noted as open. It stays out of the math until the result lands." },
-  { t: "d", x: "3 days later" },
-  { t: "u", x: "Got the CSC141 result. 18 out of 20." },
-  { t: "r", x: "Resolved — that open record is now 18/20. CSC141 sits at 84.2%, and the pace holds." },
-];
-
-function TypedJournal() {
-  const ref = useRef<HTMLDivElement>(null);
-  const [done, setDone] = useState(0);
-  const [typed, setTyped] = useState(0);
-  const [finished, setFinished] = useState(false);
-  const started = useRef(false);
-  const alive = useRef(true);
-
-  useEffect(() => {
-    alive.current = true;
-    const el = ref.current;
-    if (!el) return;
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const io = new IntersectionObserver(
-      (es) => {
-        if (es[0].isIntersecting && !started.current) {
-          started.current = true;
-          io.disconnect();
-          if (reduce) {
-            setDone(SEQ.length);
-            setFinished(true);
-            return;
-          }
-          run();
-        }
-      },
-      { threshold: 0.35 }
+  if (done) {
+    return (
+      <GlassCard className="p-5 animate-fade-up">
+        <p className="text-sm text-[var(--ink-soft)]">Logged. Your balance and the weekly picture are up to date — rest well.</p>
+      </GlassCard>
     );
-    io.observe(el);
-    return () => {
-      alive.current = false;
-      io.disconnect();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const sleep = (ms: number) => new Promise<void>((res) => setTimeout(res, ms));
-
-  async function run() {
-    for (let i = 0; i < SEQ.length && alive.current; i++) {
-      const m = SEQ[i];
-      if (m.t === "u") {
-        setTyped(0);
-        for (let c = 1; c <= m.x.length && alive.current; c++) {
-          setTyped(c);
-          await sleep(26);
-        }
-        await sleep(420);
-      } else if (m.t === "r") {
-        await sleep(950);
-      } else {
-        await sleep(700);
-      }
-      setDone(i + 1);
-      if (alive.current) await sleep(m.t === "d" ? 900 : 700);
-    }
-    if (alive.current) setFinished(true);
   }
 
   return (
-    <div ref={ref}>
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-white/45">Journal · this week</span>
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 px-3 py-1 text-[11px] font-semibold text-white/60">
-          <Mic size={11} /> voice in
-        </span>
+    <GlassCard className="p-5 animate-fade-up">
+      <div className="flex items-center gap-4 mb-3">
+        <span className="neo-sm w-11 h-11 rounded-xl flex items-center justify-center shrink-0" aria-hidden><ReceiptText size={19} /></span>
+        <div>
+          <p className="font-semibold">How much did you spend today?</p>
+          <p className="text-sm text-[var(--ink-soft)]">One number is enough — your balance updates by itself.</p>
+        </div>
       </div>
-      <div className="mt-4 min-h-[300px] space-y-3 md:min-h-[280px]">
-        {SEQ.map((m, i) => {
-          if (i > done) return null;
-          const active = i === done && !finished;
-          if (m.t === "d") {
-            return (
-              <div key={i} className="flex items-center gap-3 py-1" style={{ opacity: active ? 0 : 1, transition: "opacity .5s" }}>
-                <span className="h-px flex-1 bg-white/15" />
-                <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/45">{m.x}</span>
-                <span className="h-px flex-1 bg-white/15" />
-              </div>
-            );
-          }
-          const text = m.t === "u" && active ? m.x.slice(0, typed) : m.x;
-          if (m.t === "u") {
-            return (
-              <div key={i} className="flex justify-end">
-                <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-white px-4 py-2.5 text-sm leading-snug text-[#111114]">
-                  {text}
-                  {active && <span className="caret ml-0.5" />}
-                </div>
-              </div>
-            );
-          }
-          return (
-            <div key={i} className="flex justify-start">
-              <div
-                className="max-w-[85%] rounded-2xl rounded-bl-sm border border-white/15 bg-white/10 px-4 py-2.5 text-sm leading-snug text-white/90"
-                style={{
-                  opacity: active ? 0 : 1,
-                  filter: active ? "blur(6px)" : "none",
-                  transform: active ? "translateY(6px)" : "none",
-                  transition: "opacity .55s, filter .55s, transform .55s",
-                }}
-              >
-                {active ? (
-                  <span className="tdots">
-                    <i />
-                    <i />
-                    <i />
-                  </span>
-                ) : (
-                  text
-                )}
-              </div>
-            </div>
-          );
-        })}
-        {finished && (
-          <div className="flex items-center justify-between pt-1">
-            <span className="text-xs text-white/45">One record, created and resolved across two days.</span>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 px-3 py-1 text-[11px] font-semibold text-white/60">
-              <Check size={11} /> memory held
-            </span>
-          </div>
-        )}
-      </div>
-    </div>
+      <form onSubmit={(e) => { e.preventDefault(); log(); }} className="flex gap-2 items-center">
+        <input
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          type="number"
+          inputMode="decimal"
+          aria-label="Total spent today"
+          className="focus-ring flex-1 rounded-xl px-4 py-3 text-[15px] bg-[var(--neo-base)] border border-white/30 dark:border-white/5 shadow-[inset_3px_3px_7px_rgba(10,10,15,0.08),inset_-3px_-3px_7px_rgba(255,255,255,0.7)] dark:shadow-[inset_3px_3px_8px_rgba(0,0,0,0.5),inset_-3px_-3px_7px_rgba(255,255,255,0.04)]"
+        />
+        <NeoButton type="submit" variant="accent" className="font-semibold shrink-0">Log it</NeoButton>
+      </form>
+    </GlassCard>
   );
 }
 
-export default function Page() {
-  return <Landing />;
+/** Topic coverage across all courses — engagement, not grades. */
+function TopicsStatCard() {
+  const topics = useLiveQuery(() => db.course_topics.toArray(), []) ?? [];
+  const read = topics.filter((t) => t.status === "read" || t.status === "revising").length;
+  return (
+    <Link href="/academics" className="focus-ring block h-full">
+      <GlassCard className="p-5 h-full hover:-translate-y-0.5 transition-transform">
+        <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ink-faint)] flex items-center gap-1.5"><TrendingUp size={12} aria-hidden /> Topic coverage</p>
+        <p className="font-serif text-3xl mt-2 text-[var(--ink)]">{read}<span className="text-lg text-[var(--ink-faint)]">/{topics.length}</span></p>
+        <p className="text-xs text-[var(--ink-soft)] mt-1">read or revising</p>
+      </GlassCard>
+    </Link>
+  );
 }
