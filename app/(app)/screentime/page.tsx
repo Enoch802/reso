@@ -1,17 +1,37 @@
 "use client";
+import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Hourglass, AlertCircle, Settings, Smartphone, ChevronRight } from "lucide-react";
 import { db } from "@/lib/db";
 import { GlassCard, SectionHeader, NeoButton, EmptyState, Modal } from "@/components/ui";
 import { useToday } from "@/components/AppShell";
-import { fmtMoney, prettyDate, todayStr, DAY_SHORT } from "@/lib/dates";
+import { fmtMoney, prettyDate, todayStr, addDays, DAY_SHORT } from "@/lib/dates";
 import { useRouter } from "next/navigation";
-import { screenTimePermission, openScreenTimeSettings, screenTimeAvailable } from "@/lib/screentime";
+import {
+  screenTimePermission,
+  openScreenTimeSettings,
+  screenTimeAvailable,
+  pullYesterdayScreenTime,
+} from "@/lib/screentime";
+
+function fmtDur(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = Math.round(min % 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+/** Stable color per package, for the per-app bars. */
+function colorFor(pkg: string): string {
+  let h = 0;
+  for (const ch of pkg) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return `hsl(${h} 55% 60%)`;
+}
 
 export default function ScreenTimePage() {
   const today = useToday();
   const router = useRouter();
   const [showPermission, setShowPermission] = useState(false);
+  const [perm, setPerm] = useState<"checking" | "granted" | "denied">("checking");
 
   const screenTime = useLiveQuery(() =>
     db.daily_logs
@@ -21,8 +41,19 @@ export default function ScreenTimePage() {
       .sortBy("date")
   );
 
-  const todayRecord = screenTime?.find((r) => r.date === today);
-  const todayMinutes = todayRecord?.screen_time_minutes ?? null;
+  // The most recent day that actually has screen time recorded.
+  // (The pull stores *yesterday's* completed day, so "latest" is the honest label.)
+  const latest = useMemo(
+    () => screenTime?.find((r) => typeof r.screen_time_minutes === "number") ?? null,
+    [screenTime]
+  );
+  const latestMinutes = latest?.screen_time_minutes ?? null;
+  const latestLabel = useMemo(() => {
+    if (!latest) return "";
+    if (latest.date === addDays(todayStr(), -1)) return "Yesterday";
+    if (latest.date === todayStr()) return "Today";
+    return prettyDate(latest.date);
+  }, [latest]);
 
   const recentDays = screenTime?.slice(0, 14) ?? [];
   const chartData = useMemo(() => {
@@ -62,9 +93,39 @@ export default function ScreenTimePage() {
     return Math.max(...valid.map((d) => d.minutes!));
   }, [chartData]);
 
+  // Per-app breakdown for the latest tracked day (stored by the daily pull).
+  const apps = useMemo(() => latest?.screen_time_apps ?? [], [latest]);
+  const maxApp = useMemo(() => Math.max(...apps.map((a) => a.minutes), 1), [apps]);
+
+  // Top app with a human name + logo, resolved from the stored breakdown.
   const topApp = useMemo(() => {
-    return todayRecord?.screen_time_top_app ?? null;
-  }, [todayRecord]);
+    if (!latest?.screen_time_top_app) return null;
+    const match = apps.find((a) => a.package === latest.screen_time_top_app);
+    return {
+      package: latest.screen_time_top_app,
+      name: match?.app_name ?? latest.screen_time_top_app,
+      icon: match?.icon ?? null,
+    };
+  }, [latest, apps]);
+
+  // Permission state — re-checked on return from the settings screen.
+  useEffect(() => {
+    let alive = true;
+    const check = async () => {
+      if (!screenTimeAvailable()) return;
+      const p = await screenTimePermission();
+      if (alive) setPerm(p === "granted" ? "granted" : "denied");
+    };
+    check();
+    const onVis = () => { if (document.visibilityState === "visible") check(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { alive = false; document.removeEventListener("visibilitychange", onVis); };
+  }, []);
+
+  // Fire the daily pull from here too — idempotent (once-per-day gate inside).
+  useEffect(() => {
+    if (perm === "granted" && enabled?.enabled === 1) void pullYesterdayScreenTime();
+  }, [perm, enabled?.enabled]);
 
   const renderChart = () => {
     if (chartData.length === 0) return null;
@@ -76,7 +137,7 @@ export default function ScreenTimePage() {
       <GlassCard className="p-5 animate-fade-up">
         <SectionHeader title="Screen time trend" sub={`${daysToRender.length} days tracked (last 14)`} />
         <div className="mt-6 h-40 flex items-end justify-between gap-2 sm:gap-4">
-          {chartData.map((d, i) => (
+          {chartData.map((d) => (
             <div key={d.date} className="flex-1 flex flex-col items-center gap-1 group">
               <div className="relative w-full max-w-[48px]">
                 <div
@@ -86,8 +147,8 @@ export default function ScreenTimePage() {
                   }}
                 />
                 {d.minutes !== null && (
-                  <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-[var(--neo-base)] dark:bg-[var(--neo-base-dark)] px-2 py-1 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity text-xs font-medium">
-                    {Math.round(d.minutes)} min
+                  <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-[var(--neo-base)] dark:bg-[var(--neo-base-dark)] px-2 py-1 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity text-xs font-medium whitespace-nowrap">
+                    {fmtDur(d.minutes)}
                   </div>
                 )}
               </div>
@@ -97,7 +158,7 @@ export default function ScreenTimePage() {
         </div>
         <div className="mt-4 flex justify-between items-center text-xs text-[var(--ink-faint)]">
           <span>14 days</span>
-          <span className="font-medium">{avgMinutes !== null ? `${Math.round(avgMinutes)} min avg` : "No data"}</span>
+          <span className="font-medium">{avgMinutes !== null ? `${fmtDur(avgMinutes)} avg` : "No data"}</span>
           <span>Today</span>
         </div>
       </GlassCard>
@@ -123,7 +184,7 @@ export default function ScreenTimePage() {
 
         <Modal open={showPermission} onClose={() => setShowPermission(false)} title="Setup screen time">
           <div className="text-sm text-[var(--ink-soft)] space-y-3">
-            <p>Screen time comes from Android's UsageStatsManager.</p>
+            <p>Screen time comes from Android&apos;s UsageStatsManager.</p>
             <p>Everything else keeps working exactly as it does now. If you install the Android build later, this is where the one-time setup happens.</p>
             <p className="text-xs text-[var(--ink-faint)]">This data never leaves your device — it lands in the same local store as everything else.</p>
           </div>
@@ -173,51 +234,98 @@ export default function ScreenTimePage() {
       <div className="animate-fade-up">
         <h1 className="font-serif text-3xl sm:text-4xl tracking-tight text-[var(--ink)]">Screen time</h1>
         <p className="text-sm text-[var(--ink-soft)] mt-1">
-          {todayMinutes !== null
-            ? `${Math.round(todayMinutes)} minutes today`
-            : "No data for today"}
+          {latestMinutes !== null
+            ? `${fmtDur(latestMinutes)} — ${latestLabel.toLowerCase()}`
+            : "No data yet"}
         </p>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 animate-fade-up">
         <GlassCard className="p-5">
-          <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ink-faint)] flex items-center gap-1.5"><Hourglass size={12} aria-hidden /> Today</p>
+          <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ink-faint)] flex items-center gap-1.5"><Hourglass size={12} aria-hidden /> {latestLabel || "Latest"}</p>
           <p className="font-serif text-2xl sm:text-3xl mt-2 text-[var(--ink)]">
-            {todayMinutes !== null ? `${Math.round(todayMinutes)} min` : "—"}
+            {latestMinutes !== null ? fmtDur(latestMinutes) : "—"}
           </p>
         </GlassCard>
         <GlassCard className="p-5">
           <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ink-faint)] flex items-center gap-1.5"><Smartphone size={12} aria-hidden /> Top app</p>
-          <p className="font-serif text-2xl sm:text-3xl mt-2 text-[var(--ink)] truncate">
-            {topApp ?? "—"}
-          </p>
+          {topApp ? (
+            <div className="flex items-center gap-2 mt-2">
+              {topApp.icon ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={`data:image/png;base64,${topApp.icon}`} alt="" className="w-8 h-8 rounded-lg object-contain shrink-0" />
+              ) : (
+                <div className="w-8 h-8 rounded-lg shrink-0 grid place-items-center bg-black/[0.05] dark:bg-white/[0.08] text-sm font-semibold text-[var(--ink-soft)]">
+                  {topApp.name.charAt(0)}
+                </div>
+              )}
+              <p className="font-serif text-lg text-[var(--ink)] truncate">{topApp.name}</p>
+            </div>
+          ) : (
+            <p className="font-serif text-2xl sm:text-3xl mt-2 text-[var(--ink)]">—</p>
+          )}
         </GlassCard>
         <GlassCard className="p-5">
           <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ink-faint)] flex items-center gap-1.5"><Hourglass size={12} aria-hidden /> Average</p>
           <p className="font-serif text-2xl sm:text-3xl mt-2 text-[var(--ink)]">
-            {avgMinutes !== null ? `${Math.round(avgMinutes)} min` : "—"}
+            {avgMinutes !== null ? fmtDur(avgMinutes) : "—"}
           </p>
         </GlassCard>
         <GlassCard className="p-5">
           <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ink-faint)] flex items-center gap-1.5"><Hourglass size={12} aria-hidden /> Max</p>
           <p className="font-serif text-2xl sm:text-3xl mt-2 text-[var(--ink)]">
-            {maxMinutes !== null ? `${Math.round(maxMinutes)} min` : "—"}
+            {maxMinutes !== null ? fmtDur(maxMinutes) : "—"}
           </p>
         </GlassCard>
       </div>
 
       {renderChart()}
 
-      {topApp && (
+      {/* Per-app breakdown for the latest tracked day — logos + time each */}
+      {apps.length > 0 && (
         <GlassCard className="p-5 animate-fade-up">
-          <div className="flex items-center gap-2">
-            <Smartphone className="text-[var(--accent)]" size={16} aria-hidden />
-            <div>
-              <p className="text-xs text-[var(--ink-faint)] uppercase tracking-[0.14em]">Your most-used app today</p>
-              <p className="font-medium text-[var(--ink)]">{topApp}</p>
-            </div>
+          <SectionHeader
+            title={`Where ${latestLabel.toLowerCase() || "the day"} went`}
+            sub="Per-app usage, heaviest first"
+          />
+          <div className="mt-4 space-y-3">
+            {apps.map((a) => (
+              <div key={a.package} className="flex items-center gap-3">
+                {a.icon ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={`data:image/png;base64,${a.icon}`} alt="" className="w-9 h-9 rounded-[10px] object-contain shrink-0" />
+                ) : (
+                  <div className="w-9 h-9 rounded-[10px] shrink-0 grid place-items-center bg-black/[0.05] dark:bg-white/[0.08] text-sm font-semibold text-[var(--ink-soft)]">
+                    {a.app_name.charAt(0)}
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-sm font-medium text-[var(--ink)] truncate">{a.app_name}</span>
+                    <span className="text-sm tabular-nums text-[var(--ink-soft)] shrink-0">{fmtDur(a.minutes)}</span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-black/[0.06] dark:bg-white/[0.07] mt-1 overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-1000"
+                      style={{ width: `${(a.minutes / maxApp) * 100}%`, background: colorFor(a.package) }}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
+          <p className="text-[11px] text-[var(--ink-faint)] mt-4">
+            Top {apps.length} apps. The daily total covers everything you used.
+          </p>
         </GlassCard>
+      )}
+
+      {latest === null && (
+        <EmptyState
+          icon={<Hourglass size={48} className="text-[var(--ink-faint)]" />}
+          title="No screen time data yet"
+          sub="Tracking is on — the first pull happens next time you open Reso after a full day of use."
+        />
       )}
 
       <GlassCard className="p-5 animate-fade-up border border-[var(--accent)]/30">
@@ -236,5 +344,3 @@ export default function ScreenTimePage() {
     </div>
   );
 }
-
-import { useMemo, useState } from "react";
