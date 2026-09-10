@@ -8,7 +8,7 @@ const LINKS = [
   { href: "/overview", label: "Overview", icon: Globe2 },
   { href: "/dashboard", label: "Today", icon: LayoutDashboard },
   { href: "/academics", label: "Academics", icon: BookOpenText },
-  { href: "/screentime", label: "Screen time", shortLabel: "Screen", icon: Hourglass },
+  { href: "/screentime", label: "Screen time", shortLabel: "Usage", icon: Hourglass },
   { href: "/finance", label: "Finance", icon: Wallet },
   { href: "/journal", label: "Journal", icon: NotebookPen },
   { href: "/routines", label: "Routines", icon: Repeat2 },
