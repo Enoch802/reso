@@ -6,19 +6,39 @@ import { todayStr, addDays } from "./dates";
  * Screen time syncing — local-first, Android-only, entirely optional.
  *
  * Reads daily app usage from Android's UsageStatsManager through a small
- * Capacitor plugin bridge ("ScreenTime" — see capacitor/README.md for the
- * Kotlin implementation). When the app runs as a plain web/PWA build there
- * is no native bridge: every function below degrades quietly and the rest
- * of the app works exactly as before. Nothing is ever sent to a server.
+ * Capacitor plugin bridge ("ScreenTime"). When the app runs as a plain
+ * web/PWA build there is no native bridge: every function below degrades
+ * quietly and the rest of the app works exactly as before.
+ * Nothing is ever sent to a server.
  */
+
+/** One app's usage for a day, as delivered by the native plugin. */
+export interface AppUsageInfo {
+  package: string;
+  app_name: string;
+  minutes: number;
+  icon: string | null; // base64 PNG, or null if it couldn't be encoded
+}
+
+/** Shape the UI consumes — decoupled from the Dexie row type. */
+export interface ScreenTimeDayRow {
+  date: string;
+  minutes: number;
+  top_app: string | null;
+  apps: AppUsageInfo[] | null;
+}
 
 interface ScreenTimePlugin {
   /** Whether Android's PACKAGE_USAGE_STATS permission has been granted. */
   checkPermission(): Promise<{ granted: boolean }>;
   /** Deep-link the user to the system usage-access settings screen. */
   openPermissionSettings(): Promise<void>;
-  /** Total foreground screen time (minutes) for the given yyyy-mm-dd, or null. */
-  getScreenTimeMinutes(options: { date: string }): Promise<{ minutes: number | null; top_app: string | null }>;
+  /** Foreground time for the given yyyy-mm-dd. `apps` is the per-app breakdown (heaviest first). */
+  getScreenTimeMinutes(options: { date: string; limit?: number }): Promise<{
+    minutes: number | null;
+    top_app: string | null;
+    apps?: AppUsageInfo[];
+  }>;
 }
 
 interface CapacitorGlobal {
@@ -65,10 +85,14 @@ export async function openScreenTimeSettings(): Promise<void> {
   } catch { /* graceful — the settings UI explains what happened */ }
 }
 
+// How many apps to store per day (with icons). Icons are base64 PNGs, so cap
+// this to keep daily_logs rows small. Total minutes still cover ALL apps.
+const APPS_STORED_PER_DAY = 10;
+
 /**
- * Pull yesterday's total screen time into daily_logs. Called automatically on
- * app open (once per day) — no manual entry. Returns the minutes stored, or
- * null when unavailable on this device.
+ * Pull yesterday's screen time into daily_logs. Called automatically on app
+ * open (once per day) — no manual entry. Returns the minutes stored, or null
+ * when unavailable on this device.
  */
 export async function pullYesterdayScreenTime(): Promise<number | null> {
   const p = plugin();
@@ -77,15 +101,21 @@ export async function pullYesterdayScreenTime(): Promise<number | null> {
     const yesterday = addDays(todayStr(), -1);
     // Only pull once per day.
     const last = await getMeta("screentime_last_pull");
+    const existing = (await db.daily_logs.where("date").equals(yesterday).toArray())[0];
     if (last === todayStr()) {
-      const existing = (await db.daily_logs.where("date").equals(yesterday).toArray())[0];
       return existing?.screen_time_minutes ?? null;
     }
-    const { minutes, top_app } = await p.getScreenTimeMinutes({ date: yesterday });
+    const { minutes, top_app, apps } = await p.getScreenTimeMinutes({
+      date: yesterday,
+      limit: APPS_STORED_PER_DAY,
+    });
     if (minutes == null) return null;
-    const existing = (await db.daily_logs.where("date").equals(yesterday).toArray())[0];
     if (existing) {
-      await db.daily_logs.update(existing.id!, { screen_time_minutes: minutes, screen_time_top_app: top_app ?? null });
+      await db.daily_logs.update(existing.id!, {
+        screen_time_minutes: minutes,
+        screen_time_top_app: top_app ?? null,
+        screen_time_apps: apps ?? null,
+      });
     } else {
       await db.daily_logs.add({
         date: yesterday,
@@ -95,6 +125,7 @@ export async function pullYesterdayScreenTime(): Promise<number | null> {
         parsed_summary: "",
         screen_time_minutes: minutes,
         screen_time_top_app: top_app ?? null,
+        screen_time_apps: apps ?? null,
       });
     }
     await setMeta("screentime_last_pull", todayStr());
@@ -102,4 +133,32 @@ export async function pullYesterdayScreenTime(): Promise<number | null> {
   } catch {
     return null; // plugin missing, permission revoked mid-flight, or device quirk
   }
+}
+
+/** The stored screen-time record for one date, or null. */
+export async function getScreenTimeForDate(date: string): Promise<ScreenTimeDayRow | null> {
+  const row = (await db.daily_logs.where("date").equals(date).toArray())[0];
+  if (!row || typeof row.screen_time_minutes !== "number") return null;
+  return {
+    date: row.date,
+    minutes: row.screen_time_minutes,
+    top_app: row.screen_time_top_app ?? null,
+    apps: (row as { screen_time_apps?: AppUsageInfo[] | null }).screen_time_apps ?? null,
+  };
+}
+
+/** Last `daysBack` days (oldest first) that have recorded screen time. */
+export async function getScreenTimeHistory(daysBack = 7): Promise<ScreenTimeDayRow[]> {
+  const to = todayStr();
+  const from = addDays(to, -(daysBack - 1));
+  const rows = await db.daily_logs.where("date").between(from, to).toArray();
+  return rows
+    .filter((r) => typeof r.screen_time_minutes === "number")
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((r) => ({
+      date: r.date,
+      minutes: r.screen_time_minutes as number,
+      top_app: r.screen_time_top_app ?? null,
+      apps: (r as { screen_time_apps?: AppUsageInfo[] | null }).screen_time_apps ?? null,
+    }));
 }
