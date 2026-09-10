@@ -10,7 +10,7 @@ import { pullYesterdayScreenTime, screenTimeAvailable, screenTimePermission } fr
 import { getScreenTimeEnabled, setScreenTimeEnabled } from "@/lib/db";
 import { BellRing } from "lucide-react";
 import Nav from "./Nav";
-import { primeAudio, startAlarm, stopAlarm, onAlarmChange, RingState, syncNativeAlarms, scheduleNativeIfRunning } from "@/lib/alarm";
+import { primeAudio, startAlarm, stopAlarm, onAlarmChange, RingState, syncNativeAlarms, scheduleNativeIfRunning, nativeSnoozeAlarm, ensureAlarmNotificationPermission } from "@/lib/alarm"; // ← NEW: two extra imports
 
 /* ---------------- Live "today" — re-renders the whole app at midnight ---------------- */
 const TodayCtx = createContext<string>(todayStr());
@@ -176,6 +176,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         enabled: a.enabled === 1 ? 1 : 0,
       }));
       await scheduleNativeIfRunning(nativeAlarms);
+      void ensureAlarmNotificationPermission(); // ← NEW: Android 13+ notifications, asked once
     };
     initNativeAlarms();
   }, []);
@@ -225,6 +226,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const snoozeRinging = () => {
     if (!ringing) return;
     try { localStorage.setItem(`reso-alarm-snooze:${ringing.alarmId}`, String(Date.now() + 5 * 60000)); } catch { /* noop */ }
+    void nativeSnoozeAlarm(ringing.alarmId); // ← NEW: native re-rings in 5 min even if app is closed
     stopAlarm();
   };
   const stopRinging = () => {
