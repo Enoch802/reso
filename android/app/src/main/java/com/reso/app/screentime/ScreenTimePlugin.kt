@@ -81,17 +81,22 @@ class ScreenTimePlugin : Plugin() {
                 dayEnd + 60_000L
             )
 
-            // Sum foreground time of events falling inside the requested day,
-            // de-duplicated by app package across overlapping buckets.
+            // Sum real foreground time from buckets overlapping the requested day,
+            // de-duplicated by app package across overlapping query buckets.
             val seen = mutableMapOf<String, Long>()
             for (s in stats) {
-                val first = maxOf(s.firstTimeStamp, dayStart)
-                val last = minOf(s.lastTimeStamp, dayEnd)
-                if (last <= first) continue
+                // Skip buckets that don't overlap the day. <=/>= so a bucket that
+                // merely touches midnight (e.g. the next day's bucket pulled in by
+                // the ±60s query padding) can't leak its time into this day.
+                if (s.lastTimeStamp <= dayStart || s.firstTimeStamp >= dayEnd) continue
                 val pkg = s.packageName
-                val span = last - first
-                // keep the largest bucket per package to avoid double counting
-                if (span > (seen[pkg] ?: 0L)) seen[pkg] = span
+                // totalTimeInForeground is actual accumulated foreground usage;
+                // firstTimeStamp..lastTimeStamp is only the bucket's coverage range.
+                val fg = s.totalTimeInForeground
+                if (fg <= 0L) continue
+                // keep the largest reported value per package to avoid double counting
+                // across overlapping query buckets
+                if (fg > (seen[pkg] ?: 0L)) seen[pkg] = fg
             }
             val totalMs = seen.values.sum()
             // The single app that took the most of the day's time.
