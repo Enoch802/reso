@@ -160,6 +160,8 @@ export interface DailyLog {
   screen_time_minutes?: number | null;
   /** The app that took the most of that time, when the device reports it. */
   screen_time_top_app?: string | null;
+  /** Per-app breakdown (top N, with base64 icons), stored by the same pull. Absent on rows from before this field existed. */
+  screen_time_apps?: { package: string; app_name: string; minutes: number; icon: string | null }[] | null;
 }
 
 /** Single-row settings table: whether screen time tracking is turned on. */
