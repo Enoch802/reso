@@ -8,7 +8,7 @@ const LINKS = [
   { href: "/overview", label: "Overview", icon: Globe2 },
   { href: "/dashboard", label: "Today", icon: LayoutDashboard },
   { href: "/academics", label: "Academics", icon: BookOpenText },
-  { href: "/screentime", label: "Screen time", icon: Hourglass },
+  { href: "/screentime", label: "Screen time", shortLabel: "Screen", icon: Hourglass },
   { href: "/finance", label: "Finance", icon: Wallet },
   { href: "/journal", label: "Journal", icon: NotebookPen },
   { href: "/routines", label: "Routines", icon: Repeat2 },
@@ -85,7 +85,7 @@ export default function Nav() {
 
       {/* Bar: 4 + More on phones; all 9 on tablets and laptops */}
       <div className={`mx-auto w-full ${containerClass} glass rounded-2xl flex justify-between px-1.5 py-1.5 transition-[max-width] duration-300`}>
-        {primaryItems.map(({ href, label, icon: Icon }) => {
+        {primaryItems.map(({ href, label, shortLabel, icon: Icon }) => {
           const active = isActive(href);
           return (
             <Link
@@ -97,7 +97,9 @@ export default function Nav() {
                 ${active ? "neo-sm text-[var(--ink)] font-semibold" : "text-[var(--ink-faint)] hover:text-[var(--ink-soft)]"}`}
             >
               <Icon size={18} strokeWidth={2} aria-hidden />
-              <span className="text-[9px] sm:text-[10.5px] font-medium leading-none">{label}</span>
+              <span className="text-[9px] sm:text-[10.5px] font-medium leading-none whitespace-nowrap">
+                {shortLabel ?? label}
+              </span>
             </Link>
           );
         })}
