@@ -12,9 +12,9 @@ import Checklist from "@/components/Checklist";
 import { useToday } from "@/components/AppShell";
 import {
   academicScore, financeScore, routineScore, isSickDay,
-  daysUntilExam, examCountdownText, screenTimeScore, screenTimeStreak, // ← NEW
+  daysUntilExam, examCountdownText, screenTimeScore, screenTimeStreak,
 } from "@/lib/calc";
-import { screenTimeAvailable } from "@/lib/screentime"; // ← NEW
+import { screenTimeAvailable } from "@/lib/screentime";
 import { fmtMoney, longDate, prettyDate, addDays, DAY_SHORT } from "@/lib/dates";
 
 function fmtDur(min: number): string {
@@ -42,8 +42,8 @@ export default function DashboardPage() {
   );
   const weekScores = useLiveQuery(() => db.discipline_scores.toArray(), []);
   const expensesAll = useLiveQuery(() => db.expenses.toArray(), []);
-  const dailyLogs = useLiveQuery(() => db.daily_logs.toArray(), []); // ← NEW: yesterday's minutes
-  const tracking = useLiveQuery(() => db.screentime_tracking.get(0), []); // ← NEW: goal + enabled
+  const dailyLogs = useLiveQuery(() => db.daily_logs.toArray(), []);
+  const tracking = useLiveQuery(() => db.screentime_tracking.get(0), []);
 
   const name = profile?.[0]?.name?.split(" ")[0] ?? "friend";
   const hour = new Date().getHours();
@@ -51,7 +51,7 @@ export default function DashboardPage() {
 
   const sick = isSickDay(dailyLog ?? [], today);
 
-  // ← NEW: screen-time pillar inputs (same logic as Overview — keep both in sync)
+  // Screen-time pillar inputs (matches Overview — keep both in sync)
   const stActive = screenTimeAvailable() && tracking?.enabled === 1;
   const goalMinutes = tracking?.daily_goal_minutes ?? 300;
   const yesterdayLog = useMemo(
@@ -66,11 +66,11 @@ export default function DashboardPage() {
     const a = academicScore(planItems ?? []);
     const f = sick ? null : financeScore(expenses ?? [], fs?.[0]?.daily_spending_target ?? 0);
     const r = routineScore(routines ?? [], routineLogs ?? [], today);
-    const s = stActive && !sick ? screenTimeScore(yesterdayMinutes, goalMinutes) : null; // ← NEW
+    const s = stActive && !sick ? screenTimeScore(yesterdayMinutes, goalMinutes) : null;
     const vals = [a, f, r, s].filter((v): v is number => v != null);
     const overall = vals.length ? vals.reduce((x, y) => x + y, 0) / vals.length : 0;
-    return { a, f, r, s, overall }; // ← NEW: s added
-  }, [planItems, expenses, routines, routineLogs, fs, sick, today, stActive, yesterdayMinutes, goalMinutes]); // ← NEW deps
+    return { a, f, r, s, overall };
+  }, [planItems, expenses, routines, routineLogs, fs, sick, today, stActive, yesterdayMinutes, goalMinutes]);
 
   // Persist today's discipline snapshot (patterns, not single days).
   useEffect(() => {
@@ -81,7 +81,7 @@ export default function DashboardPage() {
         academic_score: pillars.a,
         finance_score: pillars.f,
         routine_score: pillars.r,
-        screen_time_score: pillars.s, // ← NEW: stored so the weekly digest can use it
+        screen_time_score: pillars.s,
         overall_score: pillars.overall,
       };
       if (existing[0]) await db.discipline_scores.update(existing[0].id!, payload);
@@ -99,7 +99,7 @@ export default function DashboardPage() {
   const nextExam = useMemo(() => {
     if (!exams?.length || !courses) return null;
     const upcoming = exams
-      .map((ex) => ({ ex, course: courses.find((c) => c.id === ex.course_id), days: daysUntilExam(ex.exam_date) })
+      .map((ex) => ({ ex, course: courses.find((c) => c.id === ex.course_id), days: daysUntilExam(ex.exam_date) }))
       .filter((x) => x.course && x.days >= 0)
       .sort((a, b) => a.days - b.days);
     return upcoming[0] ?? null;
@@ -141,7 +141,7 @@ export default function DashboardPage() {
 
   const planTotal = planItems?.length ?? 0;
 
-  // ← NEW: detail line for the 4th pillar row.
+  // Detail line for the 4th pillar row.
   const stStreak = useMemo(
     () => (stActive ? screenTimeStreak(dailyLogs ?? [], goalMinutes) : 0),
     [dailyLogs, goalMinutes, stActive]
@@ -216,7 +216,6 @@ export default function DashboardPage() {
               icon={<Repeat2 size={17} aria-hidden />} name="Routines"
               value={pillars.r} detail={routinesToday.length ? `${routinesDone.length}/${routinesToday.length} done today` : "nothing scheduled today"}
             />
-            {/* ← NEW: 4th pillar — only when tracking is on */}
             {stActive && (
               <PillarRow
                 icon={<Hourglass size={17} aria-hidden />} name="Screen time"
