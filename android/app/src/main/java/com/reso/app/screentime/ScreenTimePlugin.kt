@@ -26,14 +26,18 @@ import java.util.TimeZone
 /**
  * ScreenTime — native bridge over Android's UsageStatsManager.
  *
- * Per-app usage is computed from the event stream (foreground/background
- * pairs), then RECONCILED against the bucket stats' totalTimeInForeground for
- * the same window by taking the MINIMUM per app. Why: many devices don't emit
- * a background event when a process is cached/evicted, leaving dangling
- * RESUMED events that the event stream would count from open until "now" —
- * inflating totals past 24h. The stats figure is real accumulated foreground
- * and can't dangle, so it acts as a per-app sanity ceiling. Total is further
- * capped at elapsed wall-clock in the day.
+ * Usage is computed purely from the event stream, clipped to
+ * [dayStart, min(dayEnd, now)]. Two correctness mechanisms replace the
+ * stats-reconciliation approach (which undercounted on devices with lazy
+ * bucket flushing):
+ *
+ * 1. Sessions crossing midnight INTO the queried day are caught by looking
+ *    back one day for their foreground event.
+ * 2. Many devices never emit a background event when a process is cached or
+ *    evicted, leaving sessions "open" since their launch — inflating them to
+ *    hours of phantom use. Those sessions are closed at the first
+ *    SCREEN_NON_INTERACTIVE event (apps cannot stay foreground once the
+ *    screen is off), and any still open at "now" is clipped to now.
  */
 @CapacitorPlugin(name = "ScreenTime")
 class ScreenTimePlugin : Plugin() {
@@ -62,7 +66,7 @@ class ScreenTimePlugin : Plugin() {
         if (pkg == context.packageName) return true                    // Reso itself
         if (pkg == "com.android.systemui") return true
         if (pkg.startsWith("com.android.launcher")) return true
-        if (pkg.endsWith(".launcher")) return true                     // Nova, Microsoft, etc.
+        if (pkg.endsWith(".launcher")) return true
         if (pkg.contains("inputmethod") || pkg.contains("keyboard")) return true
         if (pkg == "com.google.android.webview" || pkg == "com.android.webview") return true
         return false
@@ -123,87 +127,78 @@ class ScreenTimePlugin : Plugin() {
 
             // Never count time that hasn't happened yet (live "today" reads).
             val countEnd = minOf(dayEnd, System.currentTimeMillis())
-            val elapsedInDay = countEnd - dayStart
-            if (elapsedInDay <= 0) {
+            if (countEnd <= dayStart) {
                 call.resolve(empty)
                 return
             }
 
-            val includeIcons = call.getBoolean("icons", true)
+            val includeIcons = call.getBoolean("icons", true) ?: true
             val only: Set<String>? = call.getString("only")
                 ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet()
 
             val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
 
-            /* ---- Source 1: event pairing (good attribution, can dangle) ---- */
-
-            val windowStart = dayStart - 86_400_000L // catch sessions crossing midnight in
+            // Look back one day so sessions crossing midnight into this day
+            // (opened 23:50, closed 00:10) get their in-day portion counted.
+            val windowStart = dayStart - 86_400_000L
             val events = usm.queryEvents(windowStart, dayEnd)
             val event = UsageEvents.Event()
 
             val openedAt = mutableMapOf<String, Long>()
-            val eventsMs = mutableMapOf<String, Long>()
+            val totalMsByPkg = mutableMapOf<String, Long>()
 
-            fun isFg(type: Int) =
+            fun isForeground(type: Int) =
                 type == UsageEvents.Event.MOVE_TO_FOREGROUND ||
                 (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && type == UsageEvents.Event.ACTIVITY_RESUMED)
 
-            fun isBg(type: Int) =
+            fun isBackground(type: Int) =
                 type == UsageEvents.Event.MOVE_TO_BACKGROUND ||
                 (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && type == UsageEvents.Event.ACTIVITY_PAUSED) ||
                 (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && type == UsageEvents.Event.ACTIVITY_STOPPED)
 
-            fun addEvents(pkg: String, rawStart: Long, rawEnd: Long) {
+            fun isScreenOff(type: Int) =
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                type == UsageEvents.Event.SCREEN_NON_INTERACTIVE
+
+            fun closeSession(pkg: String, rawStart: Long, rawEnd: Long) {
                 val s = maxOf(rawStart, dayStart)
                 val e = minOf(rawEnd, dayEnd)
-                if (e > s) eventsMs[pkg] = (eventsMs[pkg] ?: 0L) + (e - s)
+                if (e > s) totalMsByPkg[pkg] = (totalMsByPkg[pkg] ?: 0L) + (e - s)
             }
 
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
                 val pkg = event.packageName ?: continue
-                if (isJunkPackage(pkg)) continue
+                val ts = event.timeStamp
                 when {
-                    isFg(event.eventType) -> openedAt[pkg] = event.timeStamp
-                    isBg(event.eventType) -> {
+                    isForeground(event.eventType) -> {
+                        if (!isJunkPackage(pkg)) openedAt[pkg] = ts
+                    }
+                    isBackground(event.eventType) -> {
                         val start = openedAt.remove(pkg)
-                        if (start != null) addEvents(pkg, start, event.timeStamp)
+                        if (start != null) closeSession(pkg, start, ts)
+                    }
+                    isScreenOff(event.eventType) -> {
+                        // Screen off = nothing can remain foreground. Close every
+                        // open session here — this is what defuses the dangling
+                        // RESUMED events this device's OEM never closes.
+                        for ((pkg2, start) in openedAt) closeSession(pkg2, start, ts)
+                        openedAt.clear()
                     }
                 }
             }
+            // Still open at "now" (device currently in use): clip to now.
             for ((pkg, start) in openedAt) {
-                addEvents(pkg, start, countEnd)
+                closeSession(pkg, start, countEnd)
             }
 
-            /* ---- Source 2: bucket stats (real foreground, can't dangle) ---- */
-
-            val statsMs = mutableMapOf<String, Long>()
-            for (b in usm.queryUsageStats(UsageStatsManager.INTERVAL_BEST, dayStart, countEnd)) {
-                val pkg = b.packageName ?: continue
-                if (isJunkPackage(pkg)) continue
-                if (b.lastTimeStamp <= dayStart || b.firstTimeStamp >= countEnd) continue
-                val t = b.totalTimeInForeground
-                if (t > (statsMs[pkg] ?: 0L)) statsMs[pkg] = t
-            }
-
-            /* ---- Reconcile: min of the two, per app, capped at elapsed ---- */
-
-            val perApp = mutableMapOf<String, Long>()
-            val keys = (eventsMs.keys + statsMs.keys)
-            for (pkg in keys) {
-                val byEvents = (eventsMs[pkg] ?: 0L).coerceAtMost(elapsedInDay)
-                val byStats = (statsMs[pkg] ?: 0L).coerceAtMost(elapsedInDay)
-                val honest = minOf(byEvents, byStats)
-                if (honest > 0) perApp[pkg] = honest
-            }
-
-            val totalMs = perApp.values.sum().coerceAtMost(elapsedInDay)
-            val topApp = perApp.maxByOrNull { it.value }?.key
+            val totalMs = totalMsByPkg.values.sum().coerceAtMost(countEnd - dayStart)
+            val topApp = totalMsByPkg.maxByOrNull { it.value }?.key
 
             val limit = call.getInt("limit") ?: 0
             val pm = context.packageManager
             val apps = JSArray()
-            val sorted = perApp.entries.sortedByDescending { it.value }
+            val sorted = totalMsByPkg.entries.sortedByDescending { it.value }
             val scoped = if (only != null) sorted.filter { it.key in only } else sorted
             val shown = if (limit > 0) scoped.take(limit) else scoped
             shown.forEach { (pkg, ms) ->
