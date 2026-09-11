@@ -5,13 +5,17 @@ import { Send } from "lucide-react";
 import { db } from "@/lib/db";
 import { NeoButton } from "./ui";
 import { useToday } from "./AppShell";
+import { API_BASE } from "@/lib/ai";
+
+function online(): boolean {
+  return typeof navigator === "undefined" ? true : navigator.onLine;
+}
 
 /** Course-scoped advice chat — grounded in this course's topics, exam and schedule. */
 export function CoachChat({ courseId }: { courseId: number }) {
   const today = useToday();
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
 
   const course = useLiveQuery(() => db.courses.get(courseId), [courseId]);
@@ -46,21 +50,20 @@ export function CoachChat({ courseId }: { courseId: number }) {
     const q = draft.trim();
     if (!q || busy) return;
     setDraft("");
-    setError(null);
     setBusy(true);
     await db.course_chats.add({ course_id: courseId, sender: "user", text: q, ts: Date.now() });
     try {
-      const res = await fetch("/api/ai", {
+      if (!online()) throw new Error("offline");
+      const res = await fetch(`${API_BASE}/api/ai`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode: "coach", question: q, context }),
       });
       if (!res.ok) throw new Error("failed");
       const j = await res.json();
-      await db.course_chats.add({ course_id: courseId, sender: "reso", text: j.reply ?? "I'm here — try asking again in a moment.", ts: Date.now() });
+      await db.course_chats.add({ course_id: courseId, sender: "reso", text: j.reply ?? "Try asking again in a moment.", ts: Date.now() });
     } catch {
-      setError("Reso couldn't reach the coach just now — your question is saved, try again in a moment.");
-      await db.course_chats.add({ course_id: courseId, sender: "reso", text: "I couldn't reach the coach just now. Your question is saved — try again in a moment.", ts: Date.now() });
+      await db.course_chats.add({ course_id: courseId, sender: "reso", text: "Couldn't reach the coach just now. Your question is saved — try again in a moment.", ts: Date.now() });
     } finally {
       setBusy(false);
     }
@@ -69,11 +72,6 @@ export function CoachChat({ courseId }: { courseId: number }) {
   return (
     <div>
       <div ref={boxRef} className="max-h-64 overflow-y-auto space-y-2.5 mb-3 pr-1" aria-live="polite">
-        {(messages ?? []).length === 0 && (
-          <p className="text-sm text-[var(--ink-soft)]">
-            Ask anything about this course — "what should I revise first?", "how do I split the days before the exam?"
-          </p>
-        )}
         {(messages ?? []).map((m) => (
           <div key={m.id} className={`flex ${m.sender === "user" ? "justify-end" : "justify-start"}`}>
             <div
@@ -95,8 +93,6 @@ export function CoachChat({ courseId }: { courseId: number }) {
           </div>
         )}
       </div>
-
-      {error && <p className="text-xs text-amber-600 dark:text-amber-300 mb-2">{error}</p>}
 
       <form onSubmit={(e) => { e.preventDefault(); ask(); }} className="flex gap-2 items-center">
         <input
