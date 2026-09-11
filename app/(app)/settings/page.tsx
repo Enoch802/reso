@@ -419,12 +419,11 @@ function EmailModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
     <Modal open={open} onClose={onClose} title="Email" wide>
       <p className="text-sm text-[var(--ink-soft)] mb-4">
-        Connect up to 4 Gmail accounts, read-only. Tokens are stored locally in this app's database on your device —
-        this connection's data stays on-device. Each morning Reso fetches new mail, ranks it, and tells you what actually needs you.
+        Connect up to 4 Gmail accounts, read-only. Everything stays on this device.
       </p>
       {!googleConfigured() && (
         <p className="text-xs text-amber-600 dark:text-amber-300 mb-4">
-          Gmail connection isn't configured on this install yet (needs NEXT_PUBLIC_GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET). Everything else in Reso works fully.
+          Email connection isn&apos;t set up on this install yet.
         </p>
       )}
       <div className="space-y-2.5 mb-4">
@@ -447,7 +446,7 @@ function EmailModal({ open, onClose }: { open: boolean; onClose: () => void }) {
                     })));
                     await db.email_accounts.update(a.id!, { last_fetched_at: Date.now() });
                   }
-                } catch { setErr("That account needs reconnecting because access was revoked or the connection failed."); }
+                } catch { setErr("That account needs reconnecting."); }
               }}>Refresh</NeoButton>
               <button
                 aria-label={`Remove ${a.email}`}
@@ -463,7 +462,7 @@ function EmailModal({ open, onClose }: { open: boolean; onClose: () => void }) {
       {err && <p className="text-sm text-amber-600 dark:text-amber-300 mb-3">{err}</p>}
       {(accounts?.length ?? 0) < 4 && (
         <NeoButton variant="accent" onClick={connect} disabled={busy || !googleConfigured()} className="font-semibold">
-          {busy ? "Opening Google…" : "Connect a Gmail account (stays connected)"}
+          {busy ? "Opening Google…" : "Connect a Gmail account"}
         </NeoButton>
       )}
     </Modal>
@@ -644,7 +643,6 @@ function RemoveCourse({ code, courseId }: { code: string; courseId: number }) {
 
 /**
  * Screen time tracking — Android usage access, one-time setup, fully local.
- * On the web/PWA build there is no native bridge: this explains calmly and enables nothing.
  */
 function ScreenTimeModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [enabled, setEnabled] = useState<0 | 1>(0);
@@ -720,7 +718,7 @@ function ScreenTimeModal({ open, onClose }: { open: boolean; onClose: () => void
               />
               <div className="flex items-center justify-between mt-2">
                 <p className="text-xs text-[var(--ink-faint)]">
-                  {Math.floor((parseFloat(goal) || 300) / 60)}h {(parseFloat(goal) || 300) % 60}m a day. Days at or under this score 100% on the discipline ring.
+                  {Math.floor((parseFloat(goal) || 300) / 60)}h {(parseFloat(goal) || 300) % 60}m a day.
                 </p>
                 <NeoButton
                   onClick={() => void saveGoal(parseFloat(goal) || 300)}
@@ -748,22 +746,19 @@ function ScreenTimeModal({ open, onClose }: { open: boolean; onClose: () => void
           {permissionState === "web" && (
             <div className="p-3 rounded-xl bg-[var(--neo-base)] dark:bg-[var(--neo-base-dark)]">
               <p className="font-medium text-[var(--ink)] mb-1">Android-only feature</p>
-              <p className="text-xs text-[var(--ink-faint)]">Screen time comes from Android's UsageStatsManager. Works only in the Reso Android app — not in a browser or PWA.</p>
+              <p className="text-xs text-[var(--ink-faint)]">Works only in the Reso Android app — not in a browser or PWA.</p>
             </div>
           )}
 
           {permissionState === "granted" && enabled === 1 && (
             <div className="p-3 rounded-xl bg-[var(--neo-base)] dark:bg-[var(--neo-base-dark)] border border-emerald-200 dark:border-emerald-900/30">
               <p className="text-emerald-600 dark:text-emerald-300 font-medium mb-1">Active</p>
-              <p>Each day, Reso quietly reads yesterday's usage from Android — how long you were on your phone, and which app took most of that time. It scores against your daily goal on the discipline ring, and lands beside your evening reflection as supporting context.</p>
             </div>
           )}
 
           {permissionState === "denied" && enabled === 1 && (
             <div className="p-3 rounded-xl bg-[var(--neo-base)] dark:bg-[var(--neo-base-dark)]">
               <p className="text-amber-600 dark:text-amber-300 font-medium mb-1">Permission required</p>
-              <p>Reso reads your phone usage straight from Android — total screen time and the app you spent it on most. It stays beside your evening reflection, so on a heavy-phone day the picture of your week stays honest rather than mysterious.</p>
-              <p className="text-xs text-[var(--ink-faint)] mt-1">It's read-only, stays on this device, and entirely optional.</p>
               {justGranted && <p className="text-xs text-[var(--ink-soft)] mt-2">If you've just allowed it, Reso will pick it up next time you open the app.</p>}
               <NeoButton
                 variant="accent"
@@ -773,13 +768,10 @@ function ScreenTimeModal({ open, onClose }: { open: boolean; onClose: () => void
                   await openScreenTimeSettings();
                 }}
               >
-                Open Android settings to allow
+                Open Android settings
               </NeoButton>
-              <p className="text-xs text-[var(--ink-faint)] mt-1">Look for "Usage access" and allow it for Reso — a one-time step.</p>
             </div>
           )}
-
-          <p className="text-xs text-[var(--ink-faint)]">To turn it off later, simply toggle the switch here, or revoke usage access for Reso in Android settings.</p>
         </div>
       )}
     </Modal>
@@ -837,7 +829,7 @@ function RemindersModal({ open, onClose }: { open: boolean; onClose: () => void 
   return (
     <Modal open={open} onClose={onClose} title="Reminders" wide>
       <p className="text-sm text-[var(--ink-soft)] mb-5">
-        Everything Reso reminds you about, in one place — turn any of them off, change when they arrive, or add your own.
+        Turn any of them off, change when they arrive, or add your own.
       </p>
 
       <div className="space-y-2.5">
@@ -851,7 +843,7 @@ function RemindersModal({ open, onClose }: { open: boolean; onClose: () => void 
         />
         <ToggleRow
           title="Allowance week closes"
-          sub="The evening before your next allowance, come see the week"
+          sub="The evening before your next allowance"
           checked={isEnabled("cycle9pm")}
           time={timeOf("cycle9pm", "21:00")}
           onToggle={(v) => setPref("cycle9pm", v)}
@@ -867,7 +859,7 @@ function RemindersModal({ open, onClose }: { open: boolean; onClose: () => void 
         />
         <ToggleRow
           title="Class reminders"
-          sub={slots.length ? `${slots.length} class${slots.length === 1 ? "" : "es"} on your timetable — reminded 30 minutes before each` : "Add your timetable and each class reminds 30 minutes before it starts"}
+          sub={slots.length ? `${slots.length} class${slots.length === 1 ? "" : "es"} — reminded 30 minutes before each` : "Add your timetable in Settings"}
           checked={isEnabled("class")}
           onToggle={(v) => setPref("class", v)}
         />
@@ -909,7 +901,7 @@ function RemindersModal({ open, onClose }: { open: boolean; onClose: () => void 
             <NeoButton type="submit" variant="accent" className="font-semibold">Add</NeoButton>
           </form>
           {custom.length === 0 ? (
-            <p className="text-xs text-[var(--ink-faint)]">None yet — add one above and it fires every day at its time.</p>
+            <p className="text-xs text-[var(--ink-faint)]">None yet.</p>
           ) : (
             <div className="space-y-2">
               {custom.map((c) => (
@@ -1000,8 +992,6 @@ function AlarmsModal({ open, onClose }: { open: boolean; onClose: () => void }) 
   const [time, setTime] = useState("06:30");
   const [editing, setEditing] = useState<{ id: number; label: string; time: string } | null>(null);
 
-  // Push the full list to the native AlarmManager after any change,
-  // so alarms ring with the app fully closed.
   const syncNative = async () => {
     const currentAlarms = await db.alarms.toArray();
     const nativeAlarms = currentAlarms.map((a) => ({
@@ -1030,7 +1020,7 @@ function AlarmsModal({ open, onClose }: { open: boolean; onClose: () => void }) 
   return (
     <Modal open={open} onClose={onClose} title="Alarms" wide>
       <p className="text-sm text-[var(--ink-soft)] mb-4">
-        Named alarms that ring at full volume — even with Reso closed — with snooze and stop right on the notification.
+        Alarms ring even when Reso is closed.
       </p>
 
       <form onSubmit={(e) => { e.preventDefault(); void add(); }} className="flex flex-wrap gap-2 items-end mb-4">
@@ -1040,12 +1030,12 @@ function AlarmsModal({ open, onClose }: { open: boolean; onClose: () => void }) 
       </form>
 
       {alarms.length === 0 ? (
-        <p className="text-xs text-[var(--ink-faint)]">No alarms yet — add one above.</p>
+        <p className="text-xs text-[var(--ink-faint)]">No alarms yet.</p>
       ) : (
         <div className="space-y-2">
           {alarms.map((a) => (
             <div key={a.id} className="flex items-center justify-between rounded-xl neo-sm px-4 py-3">
-                  {editing && editing.id === a.id ? (
+              {editing && editing.id === a.id ? (
                 <div className="flex-1 flex flex-wrap gap-2 items-end mr-2">
                   <Field label="Name" value={editing.label} onChange={(v) => setEditing({ ...editing, label: v })} className="flex-1 min-w-[140px]" />
                   <Field label="At" value={editing.time} onChange={(v) => setEditing({ ...editing, time: v })} type="time" className="w-[110px]" />
