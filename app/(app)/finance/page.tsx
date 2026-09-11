@@ -52,7 +52,7 @@ export default function FinancePage() {
 
   const cycleEnd = week ? days[6] : null;
   const isCycleEnd = cycleEnd ? cycleEnd.ds === today || cycleEnd.ds < today : false;
-  const saved = balance ? Math.max(0, balance.balance - 0) : 0;
+  const saved = balance ? Math.max(0, balance.balance) : 0;
   const savingsOk = settings ? saved >= settings.weekly_savings_target : false;
 
   return (
@@ -61,7 +61,7 @@ export default function FinancePage() {
         <div>
           <h1 className="font-serif text-3xl sm:text-4xl tracking-tight text-[var(--ink)]">Finance</h1>
           <p className="text-sm text-[var(--ink-soft)] mt-1">
-            {week ? `Week of ${prettyDate(week.week_start_date)}${week.rollover_from_previous ? ` — with ${fmtMoney(week.rollover_from_previous)} rolled over` : ""}` : "Your first allowance week opens here."}
+            {week ? `Week of ${prettyDate(week.week_start_date)}${week.rollover_from_previous ? ` — ${fmtMoney(week.rollover_from_previous)} rolled over` : ""}` : "No week open yet."}
           </p>
         </div>
         <div className="flex gap-2">
@@ -97,7 +97,7 @@ export default function FinancePage() {
       {/* Daily spend chart vs target */}
       {days.length > 0 && settings && (
         <GlassCard className="p-5 animate-fade-up [animation-delay:140ms] ledger">
-          <SectionHeader title="Spending trend" sub={`Daily pace against your ${fmtMoney(settings.daily_spending_target)} target.`} />
+          <SectionHeader title="Spending trend" />
           <ForexTrendChart
             days={days.map((d) => ({ ...d, amount: d.total }))}
             target={settings.daily_spending_target}
@@ -122,7 +122,7 @@ export default function FinancePage() {
                 <span className="tabular-nums">{fmtMoney(e.amount)}</span>
               </div>
             ))}
-            {weekExpenses.length === 0 && <EmptyState icon={<ReceiptText size={22} aria-hidden />} title="Nothing spent this week" sub="Quiet weeks are allowed." />}
+            {weekExpenses.length === 0 && <EmptyState icon={<ReceiptText size={22} aria-hidden />} title="Nothing spent this week" />}
           </div>
           {isCycleEnd && settings && (
             <CycleVerdict
@@ -150,8 +150,8 @@ function AddExpenseModal({ open, onClose, weekId, today }: { open: boolean; onCl
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const amt = parseFloat(amount);
-    if (isNaN(amt) || amt <= 0) { setErr("An amount above zero, please."); return; }
-    if (!weekId) { setErr("Open your finance week first (set your allowance in Settings)."); return; }
+    if (isNaN(amt) || amt <= 0) { setErr("Enter an amount above zero."); return; }
+    if (!weekId) { setErr("Set your allowance in Settings first."); return; }
     const ex: Expense = { finance_week_id: weekId, date: todayStr() || today, amount: amt, tag, note: note.trim() };
     await db.expenses.add(ex);
     setAmount(""); setNote(""); setErr("");
@@ -174,7 +174,6 @@ function AddExpenseModal({ open, onClose, weekId, today }: { open: boolean; onCl
                 className={`focus-ring rounded-xl px-4 py-3 text-sm font-medium min-h-[44px] transition-all ${tag === t ? "neo-pressed text-[var(--accent)]" : "neo text-[var(--ink-soft)]"}`}
               >
                 {t === "need" ? "Need" : "Want"}
-                <span className="block text-[11px] font-normal opacity-75">{t === "need" ? "essential, planned" : "nice-to-have"}</span>
               </button>
             ))}
           </div>
@@ -190,15 +189,11 @@ function AddExpenseModal({ open, onClose, weekId, today }: { open: boolean; onCl
   );
 }
 
-/** Modal: record extra money received during the current allowance week. */
 function AdjustBalanceModal({ open, onClose, week }: { open: boolean; onClose: () => void; week?: { id?: number; opening_balance: number } }) {
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
   return (
     <Modal open={open} onClose={onClose} title="Add funds">
-      <p className="text-sm text-[var(--ink-soft)] mb-4">
-        Record a gift, payment for work, or any other money collected during this week. It will be added to your available balance and kept in the ledger.
-      </p>
       {week?.id ? (
         <form
           onSubmit={async (e) => {
@@ -218,13 +213,12 @@ function AdjustBalanceModal({ open, onClose, week }: { open: boolean; onClose: (
           </div>
         </form>
       ) : (
-        <p className="text-sm text-[var(--ink-soft)]">No week is open yet — your allowance week opens on collection day.</p>
+        <p className="text-sm text-[var(--ink-soft)]">No week open yet.</p>
       )}
     </Modal>
   );
 }
 
-/** Professional cycle-end verdict: per-day classification + exact savings outcome. */
 function CycleVerdict({ days, saved, target, currency }: {
   days: Array<{ ds: string; day: string; total: number; cls: string }>;
   saved: number;
@@ -259,7 +253,7 @@ function CycleVerdict({ days, saved, target, currency }: {
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
         <span className="text-[var(--ink-soft)]">
-          {days.filter((d) => d.cls === "overspent").length} day(s) over, {days.filter((d) => d.cls === "underspent").length} under, {days.filter((d) => d.cls === "on target").length} on target.
+          {days.filter((d) => d.cls === "overspent").length} over · {days.filter((d) => d.cls === "underspent").length} under · {days.filter((d) => d.cls === "on target").length} on target
         </span>
         {verdict && (
           <span className="flex items-center gap-2 font-medium">
@@ -271,11 +265,6 @@ function CycleVerdict({ days, saved, target, currency }: {
   );
 }
 
-/**
- * Forex-style spending trend: a monochrome line chart with horizontal
- * gridlines, price-style axis labels, an area fill, and a dashed daily-target
- * reference line — the way a market chart reads.
- */
 function ForexTrendChart({ days, target }: {
   days: Array<{ ds: string; day: string; amount: number }>;
   target: number;
@@ -304,7 +293,6 @@ function ForexTrendChart({ days, target }: {
           </linearGradient>
         </defs>
 
-        {/* horizontal gridlines + axis labels (forex-style) */}
         {gridVals.map((v) => (
           <g key={v}>
             <line x1={PADL} y1={y(v)} x2={W - PADR} y2={y(v)} stroke="rgba(140,136,150,0.22)" strokeWidth="1" strokeDasharray={v === 0 ? "" : "2 4"} />
@@ -314,15 +302,12 @@ function ForexTrendChart({ days, target }: {
           </g>
         ))}
 
-        {/* daily-target reference line */}
         <line x1={PADL} y1={y(target)} x2={W - PADR} y2={y(target)} stroke="var(--ink)" strokeWidth="1.2" strokeDasharray="5 4" opacity="0.55" />
         <text x={W - PADR} y={y(target) - 5} textAnchor="end" fontSize="9" fill="var(--ink-faint)" fontWeight="700">TARGET</text>
 
-        {/* area + trend line */}
         <path d={area} fill="url(#fxArea)" />
         <path d={line} fill="none" stroke="var(--ink)" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
 
-        {/* session dots */}
         {pts.map(([px, py], i) => (
           <circle key={i} cx={px} cy={py} r={i === pts.length - 1 ? 4 : 2.6}
             fill={days[i].amount > target ? "var(--ink)" : "var(--page)"}
@@ -331,7 +316,6 @@ function ForexTrendChart({ days, target }: {
           </circle>
         ))}
 
-        {/* day labels along the bottom */}
         {days.map((d, i) => (
           <text key={d.ds} x={x(i)} y={H - 8} textAnchor="middle" fontSize="9.5"
             fill={i === days.length - 1 ? "var(--ink)" : "var(--ink-faint)"} fontWeight={i === days.length - 1 ? "700" : "500"}>
@@ -343,7 +327,6 @@ function ForexTrendChart({ days, target }: {
   );
 }
 
-/** Round to a tidy axis step (forex-chart gridline feel). */
 function niceStep(raw: number): number {
   const pow = Math.pow(10, Math.floor(Math.log10(Math.max(1, raw))));
   const norm = raw / pow;
