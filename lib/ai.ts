@@ -9,7 +9,7 @@
  * gracefully, so every AI feature is optional-by-design.
  */
 
-const API_BASE = "https://reso-pnjj.vercel.app";
+export const API_BASE = "https://reso-pnjj.vercel.app";
 
 function online(): boolean {
   return typeof navigator === "undefined" ? true : navigator.onLine;
