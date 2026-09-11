@@ -13,9 +13,9 @@ import Checklist from "@/components/Checklist";
 import { useToday } from "@/components/AppShell";
 import {
   academicScore, financeScore, routineScore, isSickDay, daysUntilExam, examCountdownText, routineStreak,
-  screenTimeScore, screenTimeStreak, // ← NEW: 4th pillar scoring
+  screenTimeScore, screenTimeStreak,
 } from "@/lib/calc";
-import { screenTimeAvailable } from "@/lib/screentime"; // ← NEW
+import { screenTimeAvailable } from "@/lib/screentime";
 import { fmtMoney, longDate, prettyDate, weekStartOnOrBefore, addDays, daysBetween, DAY_NAMES, DAY_SHORT } from "@/lib/dates";
 
 function fmtDur(min: number): string {
@@ -53,7 +53,7 @@ export default function OverviewPage() {
     return all.sort((a, b) => b.created_at - a.created_at).slice(0, 1);
   }, []);
   const dailyLogs = useLiveQuery(() => db.daily_logs.toArray(), []);
-  const tracking = useLiveQuery(() => db.screentime_tracking.get(0), []); // ← NEW: goal + enabled state
+  const tracking = useLiveQuery(() => db.screentime_tracking.get(0), []);
 
   const p = profile?.[0];
   const settings = fs?.[0];
@@ -65,9 +65,6 @@ export default function OverviewPage() {
   const fin = sick ? null : financeScore(expenses ?? [], settings?.daily_spending_target ?? 0);
   const rout = routineScore(routines ?? [], routineLogs ?? [], today);
 
-  // ← NEW: Screen-time pillar — scores YESTERDAY's completed day against the
-  // goal. null (excluded from the ring) when tracking is off, unavailable on
-  // this device, no data yet, or on a sick day (rest days count nothing).
   const goalMinutes = tracking?.daily_goal_minutes ?? 300;
   const stActive = screenTimeAvailable() && tracking?.enabled === 1;
   const yesterdayLog = useMemo(
@@ -78,10 +75,6 @@ export default function OverviewPage() {
     ? (yesterdayLog.screen_time_minutes as number)
     : null;
   const scr = stActive && !sick ? screenTimeScore(yesterdayMinutes, goalMinutes) : null;
-  const stStreak = useMemo(
-    () => (stActive ? screenTimeStreak(dailyLogs ?? [], goalMinutes) : 0),
-    [dailyLogs, goalMinutes, stActive]
-  );
 
   const pillars = [acad, fin, rout, scr].filter((v): v is number => v != null);
   const overall = pillars.length ? pillars.reduce((a, b) => a + b, 0) / pillars.length : null;
@@ -102,7 +95,6 @@ export default function OverviewPage() {
     return week.opening_balance - weekSpend;
   }, [week, weekSpend]);
 
-  // Balance trend: last 4 allowance cycles
   const balanceTrend = useMemo(() => {
     if (!weeks?.length || !allExpenses) return [];
     return weeks
@@ -124,7 +116,6 @@ export default function OverviewPage() {
     return up[0] ?? null;
   }, [exams, courses]);
 
-  // Next class today
   const nextClass = useMemo(() => {
     const todays = (slots ?? []).filter((s) => s.day_of_week === dow).sort((a, b) => a.start_time.localeCompare(b.start_time));
     const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
@@ -160,10 +151,6 @@ export default function OverviewPage() {
   const semesterLen = p ? Math.max(1, daysBetween(p.semester_start_date, p.semester_end_date) + 1) : 1;
   const semesterPct = Math.min(100, Math.round((semesterDay / semesterLen) * 100));
 
-  const journalStreakDays = useMemo(() => {
-    return new Set((dailyLogs ?? []).filter((l) => l.evening_reflection_text?.trim()).map((l) => l.date)).size;
-  }, [dailyLogs]);
-
   const latestDigest = digests?.[0];
   const digestPreview = latestDigest?.digest_text.split("\n").filter(Boolean).slice(0, 2).join(" ") ?? "";
 
@@ -181,15 +168,6 @@ export default function OverviewPage() {
 
   const planTotal = planItems?.length ?? 0;
 
-  // ← NEW: detail line for the screen-time pillar row.
-  const scrDetail = (() => {
-    if (sick) return "rest day — not scored";
-    if (!stActive) return "";
-    if (yesterdayMinutes == null) return "yesterday: no data yet — builds as days are logged";
-    const base = `yesterday: ${fmtDur(yesterdayMinutes)} of ${fmtDur(goalMinutes)} goal`;
-    return stStreak > 0 ? `${base} · ${stStreak}d under-goal streak` : base;
-  })();
-
   return (
     <div className="space-y-6">
       {/* Greeting + semester position */}
@@ -201,7 +179,7 @@ export default function OverviewPage() {
             ? "You're under the weather today — nothing counts against you."
             : overall != null
               ? `Day ${semesterDay} of ${semesterLen} — running at ${Math.round(overall)}% today.`
-              : `Day ${semesterDay} of ${semesterLen}. The day is yours to shape.`}
+              : `Day ${semesterDay} of ${semesterLen}.`}
         </p>
         <div className="mt-3 h-1.5 rounded-full bg-black/[0.06] dark:bg-white/[0.07] overflow-hidden" aria-label={`Semester ${semesterPct}% complete`}>
           <div className="h-full bg-[var(--ink)] transition-all duration-1000" style={{ width: `${semesterPct}%` }} />
@@ -215,12 +193,11 @@ export default function OverviewPage() {
             {sick ? <Ring percent={0} label="Rest day" sublabel="not scored" /> : <Ring percent={overall ?? 0} label="Discipline" sublabel="today" />}
           </div>
           <div className="flex-1 w-full space-y-4">
-            <PillarRow icon={<BookOpenCheck size={17} aria-hidden />} name="Today's Plan" value={acad} detail={planTotal ? `${planDone}/${planTotal} done` : "no plan yet"} />
-            <PillarRow icon={<Wallet2 size={17} aria-hidden />} name="Finance" value={fin} detail={sick ? "rest day — not scored" : expenses?.length ? `${fmtMoney(expenses.reduce((a, e) => a + e.amount, 0))} logged today` : "nothing spent yet today"} />
-            <PillarRow icon={<Repeat2 size={17} aria-hidden />} name="Routines" value={rout} detail={routinesToday.length ? `${doneCount}/${routinesToday.length} done today` : "nothing scheduled today"} />
-            {/* ← NEW: 4th pillar — renders only when tracking is on */}
+            <PillarRow icon={<BookOpenCheck size={17} aria-hidden />} name="Today's Plan" value={acad} />
+            <PillarRow icon={<Wallet2 size={17} aria-hidden />} name="Finance" value={fin} />
+            <PillarRow icon={<Repeat2 size={17} aria-hidden />} name="Routines" value={rout} />
             {stActive && (
-              <PillarRow icon={<Hourglass size={17} aria-hidden />} name="Screen time" value={scr} detail={scrDetail} />
+              <PillarRow icon={<Hourglass size={17} aria-hidden />} name="Screen time" value={scr} />
             )}
           </div>
         </div>
@@ -264,7 +241,7 @@ export default function OverviewPage() {
       {/* Checklist + money side by side */}
       <div className="grid md:grid-cols-2 gap-5 animate-fade-up [animation-delay:220ms]">
         <GlassCard className="p-5">
-          <SectionHeader icon={<ListChecks size={19} aria-hidden />} title="Today's Plan" sub="Tick them off — each check counts." />
+          <SectionHeader icon={<ListChecks size={19} aria-hidden />} title="Today's Plan" />
           <Checklist compact />
           {planTotal > planDone && planTotal > 0 && (
             <Link href="/dashboard" className="focus-ring mt-3 inline-flex items-center gap-1 text-sm font-medium text-[var(--ink-soft)]">
@@ -284,11 +261,6 @@ export default function OverviewPage() {
                   <p className="text-xs text-[var(--ink-soft)] mt-1">
                     {week ? `${fmtMoney(weekSpend)} spent of ${fmtMoney(week.opening_balance)}` : "opens on collection day"}
                   </p>
-                  {settings && (
-                    <p className="text-[11px] text-[var(--ink-faint)]">
-                      Allowance is added at 7:00 on collection day — or the next time you open Reso.
-                    </p>
-                  )}
                   {settings && settings.weekly_savings_target > 0 && balance != null && (
                     <p className="text-xs mt-1" style={{ color: "var(--ink-soft)" }}>
                       {balance >= settings.weekly_savings_target
@@ -297,7 +269,6 @@ export default function OverviewPage() {
                     </p>
                   )}
                 </div>
-                {/* Mini balance trend */}
                 {balanceTrend.length > 1 && (
                   <div className="flex items-end gap-1.5 h-14" aria-label="Balance over recent weeks">
                     {balanceTrend.map((b, i) => {
@@ -316,7 +287,6 @@ export default function OverviewPage() {
             </GlassCard>
           </Link>
 
-          {/* Evening spend check-in */}
           {hour >= 21 && (expenses ?? []).length === 0 && <SpendCheckIn today={today} weekId={week?.id} />}
         </div>
       </div>
@@ -342,9 +312,7 @@ export default function OverviewPage() {
       <div className="grid md:grid-cols-2 gap-5 animate-fade-up [animation-delay:340ms]">
         <GlassCard className="p-5">
           <SectionHeader icon={<BookOpenCheck size={19} aria-hidden />} title="Topic coverage" sub={`${topicsSummary.total} topics across ${(courses ?? []).length} courses`} />
-          {topicsSummary.total === 0 ? (
-            <p className="text-sm text-[var(--ink-soft)]">Add topics under each course in Academics to see coverage here.</p>
-          ) : (
+          {topicsSummary.total > 0 && (
             <>
               <ProportionBar
                 segments={[
@@ -361,7 +329,6 @@ export default function OverviewPage() {
                 <span>{topicsSummary.reading} reading</span>
                 <span>{topicsSummary.untouched} untouched</span>
               </div>
-              <p className="text-xs text-[var(--ink-faint)] mt-2">{journalStreakDays} journaled day{journalStreakDays === 1 ? "" : "s"} so far.</p>
             </>
           )}
         </GlassCard>
@@ -395,7 +362,7 @@ export default function OverviewPage() {
   );
 }
 
-function PillarRow({ icon, name, value, detail }: { icon: React.ReactNode; name: string; value: number | null; detail: string }) {
+function PillarRow({ icon, name, value }: { icon: React.ReactNode; name: string; value: number | null }) {
   return (
     <div className="flex items-center gap-3">
       <span className="text-[var(--ink-faint)] shrink-0" aria-hidden>{icon}</span>
@@ -407,7 +374,6 @@ function PillarRow({ icon, name, value, detail }: { icon: React.ReactNode; name:
         <div className="h-2 rounded-full bg-black/[0.06] dark:bg-white/[0.07] mt-1 overflow-hidden neo-inset !rounded-full" style={{ borderRadius: 999 }}>
           <div className="h-full rounded-full bg-[var(--ink)] transition-all duration-1000" style={{ width: `${value ?? 0}%`, opacity: value == null ? 0 : 1 }} />
         </div>
-        <p className="text-xs text-[var(--ink-faint)] mt-1">{detail}</p>
       </div>
     </div>
   );
@@ -428,7 +394,7 @@ function SpendCheckIn({ today, weekId }: { today: string; weekId?: number }) {
   if (done) {
     return (
       <GlassCard className="p-5 animate-fade-up">
-        <p className="text-sm text-[var(--ink-soft)]">Logged — the weekly picture is up to date.</p>
+        <p className="text-sm text-[var(--ink-soft)]">Logged.</p>
       </GlassCard>
     );
   }
@@ -439,7 +405,6 @@ function SpendCheckIn({ today, weekId }: { today: string; weekId?: number }) {
         <span className="neo-sm w-11 h-11 rounded-xl flex items-center justify-center shrink-0" aria-hidden><ReceiptText size={19} /></span>
         <div>
           <p className="font-semibold">How much did you spend today?</p>
-          <p className="text-sm text-[var(--ink-soft)]">One number is enough — your balance updates itself.</p>
         </div>
       </div>
       <form onSubmit={(e) => { e.preventDefault(); log(); }} className="flex gap-2 items-center">
