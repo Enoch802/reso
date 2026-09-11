@@ -10,7 +10,7 @@ import { pullYesterdayScreenTime, screenTimeAvailable, screenTimePermission } fr
 import { getScreenTimeEnabled, setScreenTimeEnabled } from "@/lib/db";
 import { BellRing } from "lucide-react";
 import Nav from "./Nav";
-import { primeAudio, startAlarm, stopAlarm, onAlarmChange, RingState, syncNativeAlarms, scheduleNativeIfRunning, nativeSnoozeAlarm, ensureAlarmNotificationPermission } from "@/lib/alarm"; // ← NEW: two extra imports
+import { primeAudio, startAlarm, stopAlarm, onAlarmChange, RingState, syncNativeAlarms, scheduleNativeIfRunning, nativeSnoozeAlarm, ensureAlarmNotificationPermission } from "@/lib/alarm";
 
 /* ---------------- Live "today" — re-renders the whole app at midnight ---------------- */
 const TodayCtx = createContext<string>(todayStr());
@@ -176,7 +176,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         enabled: a.enabled === 1 ? 1 : 0,
       }));
       await scheduleNativeIfRunning(nativeAlarms);
-      void ensureAlarmNotificationPermission(); // ← NEW: Android 13+ notifications, asked once
+      void ensureAlarmNotificationPermission(); // Android 13+ notifications, asked once
     };
     initNativeAlarms();
   }, []);
@@ -226,7 +226,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const snoozeRinging = () => {
     if (!ringing) return;
     try { localStorage.setItem(`reso-alarm-snooze:${ringing.alarmId}`, String(Date.now() + 5 * 60000)); } catch { /* noop */ }
-    void nativeSnoozeAlarm(ringing.alarmId); // ← NEW: native re-rings in 5 min even if app is closed
+    void nativeSnoozeAlarm(ringing.alarmId); // native re-rings in 5 min even if app is closed
     stopAlarm();
   };
   const stopRinging = () => {
@@ -249,6 +249,26 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         await migrateTopicStatuses();
         await setMeta("topic_migration_v2", "1");
       }
+    })();
+  }, []);
+
+  // One-time cleanup: rows written by the old buggy build recorded impossible
+  // values (bucket spans, not real usage). A day can't exceed 1440 minutes.
+  // Runs once ever; nulls the bad numbers but keeps each row (journal text survives).
+  useEffect(() => {
+    (async () => {
+      if (await getMeta("screentime_corrupt_cleanup")) return;
+      const bad = await db.daily_logs.filter(
+        (r) => typeof r.screen_time_minutes === "number" && (r.screen_time_minutes as number) > 1440
+      ).toArray();
+      for (const row of bad) {
+        await db.daily_logs.update(row.id!, {
+          screen_time_minutes: null,
+          screen_time_top_app: null,
+          screen_time_apps: null,
+        });
+      }
+      await setMeta("screentime_corrupt_cleanup", "1");
     })();
   }, []);
 
