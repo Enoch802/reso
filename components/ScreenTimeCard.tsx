@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Smartphone } from "lucide-react";
 import { db } from "@/lib/db";
@@ -39,6 +39,7 @@ export default function ScreenTimeCard() {
   // The settings toggle — card stays invisible while OFF, reacts instantly to changes.
   const tracking = useLiveQuery(() => db.screentime_tracking.get(0), []);
   const enabled = tracking?.enabled ?? 0;
+  const goalMinutes = tracking?.daily_goal_minutes ?? 300; // ← NEW
 
   const [perm, setPerm] = useState<"checking" | "granted" | "denied" | "web">("checking");
   useEffect(() => {
@@ -61,10 +62,16 @@ export default function ScreenTimeCard() {
   }, [perm, enabled]);
 
   // Last 7 days with recorded screen time (oldest → newest).
+  // ← NEW: corrupt rows (>1440 min, from the old bucket-span bug) are excluded,
+  // matching the screentime page's filter.
   const history = useLiveQuery(async () => {
     const rows = await db.daily_logs.where("date").between(addDays(today, -6), today).toArray();
     return rows
-      .filter((r) => typeof r.screen_time_minutes === "number")
+      .filter((r) =>
+        typeof r.screen_time_minutes === "number" &&
+        (r.screen_time_minutes as number) > 0 &&
+        (r.screen_time_minutes as number) <= 1440
+      )
       .sort((a, b) => a.date.localeCompare(b.date))
       .map((r) => ({
         date: r.date,
@@ -108,6 +115,20 @@ export default function ScreenTimeCard() {
   const maxApp = Math.max(...apps.map((a) => a.minutes), 1);
   const maxDay = Math.max(...days.map((d) => d.minutes), 1);
 
+  // ← NEW: goal state for the latest completed day + under-goal streak
+  // (today never counts — it's partial). A missing yesterday zeroes the streak.
+  const underGoal = latest.minutes <= goalMinutes;
+  const streak = useMemo(() => {
+    const complete = days.filter((d) => d.date !== today);
+    if (!complete.length || complete[complete.length - 1].date !== addDays(today, -1)) return 0;
+    let s = 0;
+    for (let i = complete.length - 1; i >= 0; i--) {
+      if (complete[i].minutes > goalMinutes) break;
+      s++;
+    }
+    return s;
+  }, [days, goalMinutes, today]);
+
   return (
     <div className="animate-fade-up [animation-delay:250ms]">
       <SectionHeader
@@ -116,13 +137,19 @@ export default function ScreenTimeCard() {
         sub="Logged automatically from the day before. On-device only."
       />
       <GlassCard className="p-5">
-        {/* headline: most recent day */}
+        {/* headline: most recent day, scored against the goal */}
         <div className="flex items-baseline justify-between gap-3">
           <div>
             <p className="font-serif text-3xl text-[var(--ink)]">{fmtDur(latest.minutes)}</p>
             <p className="text-xs text-[var(--ink-soft)] mt-1">
               {latestLabel}
               {topName ? ` — most on ${topName}` : ""}
+              {/* ← NEW: goal verdict + streak */}
+              {" · "}
+              <span className={underGoal ? "text-emerald-500 font-medium" : "text-amber-500 font-medium"}>
+                {underGoal ? "under" : "over"} your {fmtDur(goalMinutes)} goal
+              </span>
+              {streak > 1 ? ` · ${streak}d streak` : ""}
             </p>
           </div>
           <p className="text-xs text-[var(--ink-faint)] text-right">
@@ -131,6 +158,14 @@ export default function ScreenTimeCard() {
               {fmtDur(Math.round(days.reduce((s, d) => s + d.minutes, 0) / days.length))}
             </span>
           </p>
+        </div>
+
+        {/* ← NEW: goal progress bar for the latest day (full width = at goal; red overhang = over) */}
+        <div className="mt-3 h-1.5 rounded-full bg-black/[0.06] dark:bg-white/[0.07] overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-1000 ${underGoal ? "bg-emerald-500" : "bg-amber-500"}`}
+            style={{ width: `${Math.min(100, (latest.minutes / goalMinutes) * 100)}%` }}
+          />
         </div>
 
         {/* per-app breakdown for the latest day, logos included */}
