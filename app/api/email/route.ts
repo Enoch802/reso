@@ -7,10 +7,32 @@ import { NextRequest, NextResponse } from "next/server";
  * happen server-side), refreshes the token if expired (via refresh_token when a
  * client secret is configured), ranks each mail with OpenRouter, and returns the
  * ranked list. The route itself retains nothing.
+ *
+ * CORS handled here directly — the bundled Android app (origin https://localhost)
+ * calls this route cross-origin; the OPTIONS handler answers the preflight and
+ * every response is stamped with allow-headers.
  */
 
 const OR_URL = "https://openrouter.ai/api/v1/chat/completions";
 const OR_MODEL = "openrouter/free";
+
+const CORS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Max-Age": "86400",
+};
+
+function json(data: unknown, status = 200) {
+  return new NextResponse(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json", ...CORS },
+  });
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS });
+}
 
 interface RankedEmail {
   subject: string;
@@ -54,9 +76,9 @@ export async function POST(req: NextRequest) {
 
     // Token refresh via the same stateless pattern when expired.
     if (!accessToken || Date.now() > Number(token_expires_at ?? 0)) {
-      if (!refresh_token) return NextResponse.json({ error: "reconnect-needed" }, { status: 401 });
+      if (!refresh_token) return json({ error: "reconnect-needed" }, 401);
       const refreshed = await refreshAccessToken(refresh_token);
-      if (!refreshed) return NextResponse.json({ error: "reconnect-needed" }, { status: 401 });
+      if (!refreshed) return json({ error: "reconnect-needed" }, 401);
       accessToken = refreshed.access_token;
       expiresAt = Date.now() + refreshed.expires_in * 1000;
     }
@@ -64,8 +86,8 @@ export async function POST(req: NextRequest) {
     // New mail since last fetch (or the last day's mail on first fetch).
     const after = Math.floor((last_fetched_at ? Number(last_fetched_at) : Date.now() - 86400000) / 1000);
     const listRes = await gmailFetch(`messages?maxResults=25&q=newer_than:1d`, accessToken);
-    if (listRes.status === 401) return NextResponse.json({ error: "reconnect-needed" }, { status: 401 });
-    if (!listRes.ok) return NextResponse.json({ error: "email-failed" }, { status: 502 });
+    if (listRes.status === 401) return json({ error: "reconnect-needed" }, 401);
+    if (!listRes.ok) return json({ error: "email-failed" }, 502);
     const list = await listRes.json();
     const ids: string[] = (list.messages ?? []).map((m: { id: string }) => m.id);
 
@@ -81,11 +103,11 @@ export async function POST(req: NextRequest) {
       mails.push({ subject, sender, snippet: snippet.slice(0, 220) });
     }
 
-    if (!mails.length) return NextResponse.json({ items: [], accessToken, expiresAt });
+    if (!mails.length) return json({ items: [], accessToken, expiresAt });
 
     // Rank with OpenRouter.
     const key = process.env.OPENROUTER_API_KEY;
-    if (!key) return NextResponse.json({ error: "ai-not-configured" }, { status: 503 });
+    if (!key) return json({ error: "ai-not-configured" }, 503);
     const rankRes = await fetch(OR_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
@@ -101,7 +123,7 @@ export async function POST(req: NextRequest) {
         ],
       }),
     });
-    if (!rankRes.ok) return NextResponse.json({ error: "email-failed" }, { status: 502 });
+    if (!rankRes.ok) return json({ error: "email-failed" }, 502);
     const data = await rankRes.json();
     const text: string = data?.choices?.[0]?.message?.content ?? "[]";
     const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -113,8 +135,8 @@ export async function POST(req: NextRequest) {
       const parsed = JSON.parse(raw.slice(start, end + 1));
       items = (parsed.items ?? []).filter((i: RankedEmail) => i && i.subject != null);
     }
-    return NextResponse.json({ items, accessToken, expiresAt });
+    return json({ items, accessToken, expiresAt });
   } catch {
-    return NextResponse.json({ error: "email-failed" }, { status: 502 });
+    return json({ error: "email-failed" }, 502);
   }
 }
