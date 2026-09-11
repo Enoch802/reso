@@ -26,25 +26,14 @@ import java.util.TimeZone
 /**
  * ScreenTime — native bridge over Android's UsageStatsManager.
  *
- *   checkPermission()            -> { granted: boolean }
- *   openPermissionSettings()     -> void
- *   getScreenTimeMinutes({date, limit?, icons?, only?}) -> {
- *     minutes: number | null,     // total across ALL non-system apps
- *     top_app: string | null,
- *     apps: [{ package, app_name, minutes, icon }]  // heaviest first
- *   }
- *
- * Params:
- *   limit  — max apps in the breakdown (0 = all). Total always covers everything.
- *   icons  — default true. Pass false for cheap frequent polls (live "today");
- *            the web layer caches icons and fetches unknowns via `only`.
- *   only   — comma-separated package list; restricts the breakdown to those
- *            packages (used for icon-only fetches).
- *
- * Usage is computed from the raw event stream (foreground/background pairs),
- * clipped strictly to [dayStart, dayEnd) — and for live "today" reads, to
- * "now". System components (launchers, SystemUI, keyboards, webview, Reso
- * itself) are excluded from both totals and the per-app list.
+ * Per-app usage is computed from the event stream (foreground/background
+ * pairs), then RECONCILED against the bucket stats' totalTimeInForeground for
+ * the same window by taking the MINIMUM per app. Why: many devices don't emit
+ * a background event when a process is cached/evicted, leaving dangling
+ * RESUMED events that the event stream would count from open until "now" —
+ * inflating totals past 24h. The stats figure is real accumulated foreground
+ * and can't dangle, so it acts as a per-app sanity ceiling. Total is further
+ * capped at elapsed wall-clock in the day.
  */
 @CapacitorPlugin(name = "ScreenTime")
 class ScreenTimePlugin : Plugin() {
@@ -72,14 +61,14 @@ class ScreenTimePlugin : Plugin() {
     private fun isJunkPackage(pkg: String): Boolean {
         if (pkg == context.packageName) return true                    // Reso itself
         if (pkg == "com.android.systemui") return true
-        if (pkg.startsWith("com.android.launcher")) return true        // AOSP launchers
+        if (pkg.startsWith("com.android.launcher")) return true
         if (pkg.endsWith(".launcher")) return true                     // Nova, Microsoft, etc.
-        if (pkg.contains("inputmethod") || pkg.contains("keyboard")) return true // IMEs
+        if (pkg.contains("inputmethod") || pkg.contains("keyboard")) return true
         if (pkg == "com.google.android.webview" || pkg == "com.android.webview") return true
         return false
     }
 
-    /** App icon as a downscaled base64 PNG, so the web side gets logos without file access. */
+    /** App icon as a downscaled base64 PNG. */
     private fun encodeIcon(pkg: String, size: Int = 96): String? = try {
         val d = context.packageManager.getApplicationIcon(pkg)
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
@@ -132,71 +121,91 @@ class ScreenTimePlugin : Plugin() {
             val dayStart = fmt.parse(dateStr)!!.time
             val dayEnd = dayStart + 86_400_000L
 
-            // A live "today" read must never count time that hasn't happened yet.
+            // Never count time that hasn't happened yet (live "today" reads).
             val countEnd = minOf(dayEnd, System.currentTimeMillis())
-
-            // Look back one day so a session crossing midnight into the queried
-            // day (opened 23:50, closed 00:10) still gets its in-day portion.
-            val windowStart = dayStart - 86_400_000L
+            val elapsedInDay = countEnd - dayStart
+            if (elapsedInDay <= 0) {
+                call.resolve(empty)
+                return
+            }
 
             val includeIcons = call.getBoolean("icons", true)
             val only: Set<String>? = call.getString("only")
                 ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet()
 
             val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+
+            /* ---- Source 1: event pairing (good attribution, can dangle) ---- */
+
+            val windowStart = dayStart - 86_400_000L // catch sessions crossing midnight in
             val events = usm.queryEvents(windowStart, dayEnd)
             val event = UsageEvents.Event()
 
-            val openedAt = mutableMapOf<String, Long>() // package -> raw foreground timestamp
-            val totalMsByPkg = mutableMapOf<String, Long>()
+            val openedAt = mutableMapOf<String, Long>()
+            val eventsMs = mutableMapOf<String, Long>()
 
-            fun isForegroundEvent(type: Int) =
+            fun isFg(type: Int) =
                 type == UsageEvents.Event.MOVE_TO_FOREGROUND ||
                 (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && type == UsageEvents.Event.ACTIVITY_RESUMED)
 
-            fun isBackgroundEvent(type: Int) =
+            fun isBg(type: Int) =
                 type == UsageEvents.Event.MOVE_TO_BACKGROUND ||
                 (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && type == UsageEvents.Event.ACTIVITY_PAUSED) ||
                 (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && type == UsageEvents.Event.ACTIVITY_STOPPED)
 
-            fun addSession(pkg: String, rawStart: Long, rawEnd: Long) {
+            fun addEvents(pkg: String, rawStart: Long, rawEnd: Long) {
                 val s = maxOf(rawStart, dayStart)
                 val e = minOf(rawEnd, dayEnd)
-                if (e > s) {
-                    totalMsByPkg[pkg] = (totalMsByPkg[pkg] ?: 0L) + (e - s)
-                }
+                if (e > s) eventsMs[pkg] = (eventsMs[pkg] ?: 0L) + (e - s)
             }
 
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
                 val pkg = event.packageName ?: continue
                 if (isJunkPackage(pkg)) continue
-                val ts = event.timeStamp
                 when {
-                    isForegroundEvent(event.eventType) -> {
-                        openedAt[pkg] = ts
-                    }
-                    isBackgroundEvent(event.eventType) -> {
+                    isFg(event.eventType) -> openedAt[pkg] = event.timeStamp
+                    isBg(event.eventType) -> {
                         val start = openedAt.remove(pkg)
-                        if (start != null) addSession(pkg, start, ts)
+                        if (start != null) addEvents(pkg, start, event.timeStamp)
                     }
                 }
             }
-            // Still-open sessions: clip to `countEnd` so a live read of "today"
-            // counts the currently-open app's real elapsed time, not to midnight.
             for ((pkg, start) in openedAt) {
-                addSession(pkg, start, countEnd)
+                addEvents(pkg, start, countEnd)
             }
 
-            val scoped = if (only != null) totalMsByPkg.filterKeys { it in only } else totalMsByPkg
-            val totalMs = totalMsByPkg.values.sum().coerceAtMost(86_400_000L)
-            val topApp = scoped.maxByOrNull { it.value }?.key
+            /* ---- Source 2: bucket stats (real foreground, can't dangle) ---- */
+
+            val statsMs = mutableMapOf<String, Long>()
+            for (b in usm.queryUsageStats(UsageStatsManager.INTERVAL_BEST, dayStart, countEnd)) {
+                val pkg = b.packageName ?: continue
+                if (isJunkPackage(pkg)) continue
+                if (b.lastTimeStamp <= dayStart || b.firstTimeStamp >= countEnd) continue
+                val t = b.totalTimeInForeground
+                if (t > (statsMs[pkg] ?: 0L)) statsMs[pkg] = t
+            }
+
+            /* ---- Reconcile: min of the two, per app, capped at elapsed ---- */
+
+            val perApp = mutableMapOf<String, Long>()
+            val keys = (eventsMs.keys + statsMs.keys)
+            for (pkg in keys) {
+                val byEvents = (eventsMs[pkg] ?: 0L).coerceAtMost(elapsedInDay)
+                val byStats = (statsMs[pkg] ?: 0L).coerceAtMost(elapsedInDay)
+                val honest = minOf(byEvents, byStats)
+                if (honest > 0) perApp[pkg] = honest
+            }
+
+            val totalMs = perApp.values.sum().coerceAtMost(elapsedInDay)
+            val topApp = perApp.maxByOrNull { it.value }?.key
 
             val limit = call.getInt("limit") ?: 0
             val pm = context.packageManager
             val apps = JSArray()
-            val sorted = scoped.entries.sortedByDescending { it.value }
-            val shown = if (limit > 0) sorted.take(limit) else sorted
+            val sorted = perApp.entries.sortedByDescending { it.value }
+            val scoped = if (only != null) sorted.filter { it.key in only } else sorted
+            val shown = if (limit > 0) scoped.take(limit) else scoped
             shown.forEach { (pkg, ms) ->
                 val label = try {
                     pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
