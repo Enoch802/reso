@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useLiveQuery } from "dexie-react-hooks";
-import { BookOpenCheck, ChevronRight, CalendarDays, ListChecks, AlarmClock } from "lucide-react";
+import { BookOpenCheck, ChevronRight, CalendarDays, ListChecks } from "lucide-react";
 import { db } from "@/lib/db";
 import type { Exam } from "@/lib/db";
 import { GlassCard, SectionHeader, EmptyState, Tag, ProportionBar } from "@/components/ui";
@@ -10,7 +10,6 @@ import { useToday } from "@/components/AppShell";
 import { daysUntilExam, examCountdownText } from "@/lib/calc";
 import { prettyDate } from "@/lib/dates";
 
-/** Academics — conceptual coverage and exam logistics, no numeric grade tracking. */
 export default function AcademicsPage() {
   const today = useToday();
   const courses = useLiveQuery(() => db.courses.toArray(), []);
@@ -61,12 +60,8 @@ export default function AcademicsPage() {
     <div className="space-y-6 pb-8">
       <div className="animate-fade-up">
         <h1 className="font-serif text-3xl sm:text-4xl tracking-tight">Academics</h1>
-        <p className="text-sm text-[var(--ink-soft)] mt-1">
-          Conceptual coverage per course, and what's coming. Coverage, not grades.
-        </p>
       </div>
 
-      {/* Upcoming exams — logistics only, no speculation */}
       {upcomingExams.length > 0 && (
         <div className="animate-fade-up [animation-delay:80ms]">
           <SectionHeader icon={<AlarmClock size={19} aria-hidden />} title="Coming up" />
@@ -90,7 +85,7 @@ export default function AcademicsPage() {
 
       {/* Courses */}
       <div className="animate-fade-up [animation-delay:140ms]">
-        <SectionHeader icon={<BookOpenCheck size={19} aria-hidden />} title="Your courses" sub={courseRows.length > 8 ? `${courseRows.length} courses — search or filter to find one fast.` : "Tap a course for its topics and exam details."} />
+        <SectionHeader icon={<BookOpenCheck size={19} aria-hidden />} title="Your courses" />
         {courseRows.length > 4 && (
           <div className="flex flex-col sm:flex-row gap-2.5 mb-4">
             <input
@@ -119,7 +114,6 @@ export default function AcademicsPage() {
             <EmptyState
               icon={<BookOpenCheck size={26} aria-hidden />}
               title="No courses yet"
-              sub="Add them in Settings — Courses, and topic tracking comes alive here."
             />
           </GlassCard>
         )}
@@ -150,11 +144,7 @@ export default function AcademicsPage() {
                         { value: row.untouched, className: "bg-black/10 dark:bg-white/10", label: "untouched" },
                       ]}
                     />
-                    <p className="text-xs text-[var(--ink-faint)] mt-1.5">{row.read} read, {row.revising} revising, {row.reading} reading</p>
                   </div>
-                )}
-                {row.total === 0 && (
-                  <p className="text-xs text-[var(--ink-faint)] mt-3 flex items-center gap-1.5"><ListChecks size={12} aria-hidden /> No topics added yet</p>
                 )}
                 <div className="flex items-center justify-between mt-3 text-xs">
                   <span className="text-[var(--ink-faint)]">{row.classes} class{row.classes === 1 ? "" : "es"} weekly</span>
@@ -171,9 +161,9 @@ export default function AcademicsPage() {
             </Link>
           ))}
           {filtered.length === 0 && courseRows.length > 0 && (
-            <div className="sm:col-span-2 xl:col-span-3">
+            <div className="sm:col-span-2 xl:grid-cols-3 xl:col-span-3">
               <GlassCard>
-                <EmptyState icon={<BookOpenCheck size={22} aria-hidden />} title="No match" sub={`Nothing matches "${query}" with that filter — try clearing it.`} />
+                <EmptyState icon={<BookOpenCheck size={22} aria-hidden />} title="No match" />
               </GlassCard>
             </div>
           )}
