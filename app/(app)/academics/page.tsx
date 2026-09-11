@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useLiveQuery } from "dexie-react-hooks";
-import { BookOpenCheck, ChevronRight, CalendarDays, ListChecks } from "lucide-react";
+import { BookOpenCheck, ChevronRight, CalendarDays, ListChecks, AlarmClock } from "lucide-react";
 import { db } from "@/lib/db";
 import type { Exam } from "@/lib/db";
 import { GlassCard, SectionHeader, EmptyState, Tag, ProportionBar } from "@/components/ui";
