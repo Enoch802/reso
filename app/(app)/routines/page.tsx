@@ -1,4 +1,4 @@
-"use client";
+="use client";
 import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Repeat2, Plus, Flame, Check, X, Pencil } from "lucide-react";
@@ -40,7 +40,7 @@ export default function RoutinesPage() {
         <div>
           <h1 className="font-serif text-3xl sm:text-4xl tracking-tight text-[var(--ink)]">Routines</h1>
           <p className="text-sm text-[var(--ink-soft)] mt-1">
-            {scheduled.length ? `${doneCount} of ${scheduled.length} done today. Patterns, not perfect days.` : "Nothing scheduled today — rest is part of it."}
+            {scheduled.length ? `${doneCount} of ${scheduled.length} done today` : "Nothing scheduled today."}
           </p>
         </div>
         <NeoButton variant="accent" onClick={() => setShowAdd(true)} className="font-semibold">
@@ -53,13 +53,12 @@ export default function RoutinesPage() {
           <EmptyState
             icon={<Repeat2 size={26} aria-hidden />}
             title="No routines yet"
-            sub="One honest routine beats five ambitious ones. What do you want to keep alive?"
           />
         </GlassCard>
       )}
 
       <div className="ledger rounded-3xl neo-card p-4 sm:p-6 space-y-3">
-        {(routines ?? []).map((r, i) => {
+        {(routines ?? []).map((r) => {
           const log = todayLog(r.id!);
           const streak = routineStreak(r, logs ?? []);
           const isToday = r.schedule_days.includes(dow);
@@ -178,14 +177,12 @@ function AddRoutineModal({ open, onClose }: { open: boolean; onClose: () => void
   );
 }
 
-/** Edit frequency (days) and reminder time of an existing routine. */
 function EditRoutineModal({ routine, onClose }: { routine: Routine | null; onClose: () => void }) {
   const [days, setDays] = useState<number[]>(routine?.schedule_days ?? []);
   const [time, setTime] = useState(routine?.reminder_time ?? "06:30");
   const [name, setName] = useState(routine?.name ?? "");
   const [confirmRemove, setConfirmRemove] = useState(false);
 
-  // reset when a different routine opens
   const [forId, setForId] = useState<number | null>(routine?.id ?? null);
   if (routine && routine.id !== forId) {
     setForId(routine.id ?? null);
@@ -229,7 +226,7 @@ function EditRoutineModal({ routine, onClose }: { routine: Routine | null; onClo
               Clear
             </button>
           </div>
-          <p className="text-xs font-medium text-[var(--ink-faint)] mb-2 uppercase tracking-wide">Frequency — runs on</p>
+          <p className="text-xs font-medium text-[var(--ink-faint)] mb-2 uppercase tracking-wide">Days</p>
           <div className="flex flex-wrap gap-2">
             {DAY_SHORT.map((d, i) => (
               <button
@@ -259,7 +256,7 @@ function EditRoutineModal({ routine, onClose }: { routine: Routine | null; onClo
               }}
               className="focus-ring text-sm font-medium text-rose-500"
             >
-              Tap again to remove this routine
+              Tap again to remove
             </button>
           ) : (
             <button type="button" onClick={() => setConfirmRemove(true)} className="focus-ring text-sm text-[var(--ink-faint)] hover:text-rose-500">
