@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
+/**
+ * Gmail OAuth callback: exchanges the auth code for tokens, then postMessages
+ * them to the popup's opener and closes itself. The postMessage targets "*"
+ * because the opener may be the bundled app (https://localhost) OR the website
+ * (this deployment's origin) — authenticity is guaranteed by the random state
+ * token, which the client verifies against sessionStorage before accepting.
+ */
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
   const state = req.nextUrl.searchParams.get("state") ?? "";
@@ -22,6 +29,6 @@ export async function GET(req: NextRequest) {
   const html = `<!doctype html><script>window.opener?.postMessage(${JSON.stringify({
     type: "reso-google-oauth", state, accessToken: tokens.access_token, refreshToken: tokens.refresh_token,
     expiresAt: Date.now() + (tokens.expires_in ?? 3600) * 1000,
-  })}, ${JSON.stringify(req.nextUrl.origin)}); window.close();</script>`;
+  })}, "*"); window.close();</script>`;
   return new NextResponse(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
