@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
   TrendingUp, Wallet2, Repeat2, BookOpenCheck, AlarmClock, ListChecks, ArrowRight,
-  ReceiptText, ScrollText, Clock3,
+  ReceiptText, ScrollText, Clock3, Hourglass,
 } from "lucide-react";
 import { db } from "@/lib/db";
 import { GlassCard, SectionHeader, Tag, ProportionBar, NeoButton, Field, Modal } from "@/components/ui";
@@ -13,8 +13,16 @@ import Checklist from "@/components/Checklist";
 import { useToday } from "@/components/AppShell";
 import {
   academicScore, financeScore, routineScore, isSickDay, daysUntilExam, examCountdownText, routineStreak,
+  screenTimeScore, screenTimeStreak, // ← NEW: 4th pillar scoring
 } from "@/lib/calc";
+import { screenTimeAvailable } from "@/lib/screentime"; // ← NEW
 import { fmtMoney, longDate, prettyDate, weekStartOnOrBefore, addDays, daysBetween, DAY_NAMES, DAY_SHORT } from "@/lib/dates";
+
+function fmtDur(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = Math.round(min % 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
 
 /**
  * Overview — the one deliberately rich screen: ring, daily measures, checklist,
@@ -45,6 +53,7 @@ export default function OverviewPage() {
     return all.sort((a, b) => b.created_at - a.created_at).slice(0, 1);
   }, []);
   const dailyLogs = useLiveQuery(() => db.daily_logs.toArray(), []);
+  const tracking = useLiveQuery(() => db.screentime_tracking.get(0), []); // ← NEW: goal + enabled state
 
   const p = profile?.[0];
   const settings = fs?.[0];
@@ -55,7 +64,26 @@ export default function OverviewPage() {
   const acad = academicScore(planItems ?? []);
   const fin = sick ? null : financeScore(expenses ?? [], settings?.daily_spending_target ?? 0);
   const rout = routineScore(routines ?? [], routineLogs ?? [], today);
-  const pillars = [acad, fin, rout].filter((v): v is number => v != null);
+
+  // ← NEW: Screen-time pillar — scores YESTERDAY's completed day against the
+  // goal. null (excluded from the ring) when tracking is off, unavailable on
+  // this device, no data yet, or on a sick day (rest days count nothing).
+  const goalMinutes = tracking?.daily_goal_minutes ?? 300;
+  const stActive = screenTimeAvailable() && tracking?.enabled === 1;
+  const yesterdayLog = useMemo(
+    () => (dailyLogs ?? []).find((l) => l.date === addDays(today, -1)) ?? null,
+    [dailyLogs, today]
+  );
+  const yesterdayMinutes = typeof yesterdayLog?.screen_time_minutes === "number"
+    ? (yesterdayLog.screen_time_minutes as number)
+    : null;
+  const scr = stActive && !sick ? screenTimeScore(yesterdayMinutes, goalMinutes) : null;
+  const stStreak = useMemo(
+    () => (stActive ? screenTimeStreak(dailyLogs ?? [], goalMinutes) : 0),
+    [dailyLogs, goalMinutes, stActive]
+  );
+
+  const pillars = [acad, fin, rout, scr].filter((v): v is number => v != null);
   const overall = pillars.length ? pillars.reduce((a, b) => a + b, 0) / pillars.length : null;
 
   const week = useMemo(() => {
@@ -153,6 +181,15 @@ export default function OverviewPage() {
 
   const planTotal = planItems?.length ?? 0;
 
+  // ← NEW: detail line for the screen-time pillar row.
+  const scrDetail = (() => {
+    if (sick) return "rest day — not scored";
+    if (!stActive) return "";
+    if (yesterdayMinutes == null) return "yesterday: no data yet — builds as days are logged";
+    const base = `yesterday: ${fmtDur(yesterdayMinutes)} of ${fmtDur(goalMinutes)} goal`;
+    return stStreak > 0 ? `${base} · ${stStreak}d under-goal streak` : base;
+  })();
+
   return (
     <div className="space-y-6">
       {/* Greeting + semester position */}
@@ -181,6 +218,10 @@ export default function OverviewPage() {
             <PillarRow icon={<BookOpenCheck size={17} aria-hidden />} name="Today's Plan" value={acad} detail={planTotal ? `${planDone}/${planTotal} done` : "no plan yet"} />
             <PillarRow icon={<Wallet2 size={17} aria-hidden />} name="Finance" value={fin} detail={sick ? "rest day — not scored" : expenses?.length ? `${fmtMoney(expenses.reduce((a, e) => a + e.amount, 0))} logged today` : "nothing spent yet today"} />
             <PillarRow icon={<Repeat2 size={17} aria-hidden />} name="Routines" value={rout} detail={routinesToday.length ? `${doneCount}/${routinesToday.length} done today` : "nothing scheduled today"} />
+            {/* ← NEW: 4th pillar — renders only when tracking is on */}
+            {stActive && (
+              <PillarRow icon={<Hourglass size={17} aria-hidden />} name="Screen time" value={scr} detail={scrDetail} />
+            )}
           </div>
         </div>
       </GlassCard>
