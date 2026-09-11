@@ -26,15 +26,15 @@ import java.util.TimeZone
 /**
  * ScreenTime — native bridge over Android's UsageStatsManager.
  *
- * Usage is computed purely from the event stream, clipped to
- * [dayStart, min(dayEnd, now)]. Sessions are closed by ANY of:
- *   - a background event (PAUSED/STOPPED/MOVE_TO_BACKGROUND),
- *   - a new foreground event for any app (single-window assumption — devices
- *     that skip PAUSED on task switch would otherwise leave sessions dangling),
- *   - a SCREEN_NON_INTERACTIVE event (nothing can stay foreground once the
- *     screen is off),
- *   - "now" for whatever is still open (live reads).
- * This needs only RESUMED + screen events, which all devices emit.
+ * Two sources, fused per app by MAX:
+ *   1. Event stream (primary — proven per-app accurate). Sessions close on:
+ *      background events, ANY new foreground event (single-window assumption
+ *      for OEMs that skip PAUSED on task switch), SCREEN_NON_INTERACTIVE
+ *      (nothing stays foreground once the screen is off), or "now".
+ *   2. Bucket stats totalTimeInForeground (floor — rescues apps whose events
+ *      this OEM fails to emit/flush, e.g. recent sessions). Stats are real
+ *      accumulated foreground and cannot dangle; each app is capped at the
+ *      elapsed time in the day, and the total likewise.
  */
 @CapacitorPlugin(name = "ScreenTime")
 class ScreenTimePlugin : Plugin() {
@@ -124,7 +124,8 @@ class ScreenTimePlugin : Plugin() {
 
             // Never count time that hasn't happened yet (live "today" reads).
             val countEnd = minOf(dayEnd, System.currentTimeMillis())
-            if (countEnd <= dayStart) {
+            val elapsedInDay = countEnd - dayStart
+            if (elapsedInDay <= 0) {
                 call.resolve(empty)
                 return
             }
@@ -135,6 +136,8 @@ class ScreenTimePlugin : Plugin() {
 
             val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
 
+            /* ---- Source 1: event pairing (primary) ---- */
+
             // Look back one day so sessions crossing midnight into this day
             // (opened 23:50, closed 00:10) get their in-day portion counted.
             val windowStart = dayStart - 86_400_000L
@@ -142,7 +145,7 @@ class ScreenTimePlugin : Plugin() {
             val event = UsageEvents.Event()
 
             val openedAt = mutableMapOf<String, Long>()
-            val totalMsByPkg = mutableMapOf<String, Long>()
+            val eventsMs = mutableMapOf<String, Long>()
 
             fun isForeground(type: Int) =
                 type == UsageEvents.Event.MOVE_TO_FOREGROUND ||
@@ -157,14 +160,14 @@ class ScreenTimePlugin : Plugin() {
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
                 type == UsageEvents.Event.SCREEN_NON_INTERACTIVE
 
-            fun closeSession(pkg: String, rawStart: Long, rawEnd: Long) {
+            fun addEvents(pkg: String, rawStart: Long, rawEnd: Long) {
                 val s = maxOf(rawStart, dayStart)
                 val e = minOf(rawEnd, dayEnd)
-                if (e > s) totalMsByPkg[pkg] = (totalMsByPkg[pkg] ?: 0L) + (e - s)
+                if (e > s) eventsMs[pkg] = (eventsMs[pkg] ?: 0L) + (e - s)
             }
 
             fun closeAll(at: Long) {
-                for ((pkg, start) in openedAt) closeSession(pkg, start, at)
+                for ((pkg, start) in openedAt) addEvents(pkg, start, at)
                 openedAt.clear()
             }
 
@@ -174,14 +177,14 @@ class ScreenTimePlugin : Plugin() {
                 val ts = event.timeStamp
                 when {
                     isForeground(event.eventType) -> {
-                        // Whether the incoming app is real or a system component
-                        // (launcher, keyboard), it ends every open session.
+                        // The incoming app — real or a system component — ends
+                        // every open session (single-window assumption).
                         closeAll(ts)
                         if (!isJunkPackage(pkg)) openedAt[pkg] = ts
                     }
                     isBackground(event.eventType) -> {
                         val start = openedAt.remove(pkg)
-                        if (start != null) closeSession(pkg, start, ts)
+                        if (start != null) addEvents(pkg, start, ts)
                     }
                     isScreenOff(event.eventType) -> closeAll(ts)
                 }
@@ -189,13 +192,34 @@ class ScreenTimePlugin : Plugin() {
             // Still open at "now" (device currently in use): clip to now.
             closeAll(countEnd)
 
-            val totalMs = totalMsByPkg.values.sum().coerceAtMost(countEnd - dayStart)
-            val topApp = totalMsByPkg.maxByOrNull { it.value }?.key
+            /* ---- Source 2: bucket stats (floor for event-missing apps) ---- */
+
+            val statsMs = mutableMapOf<String, Long>()
+            for (b in usm.queryUsageStats(UsageStatsManager.INTERVAL_BEST, dayStart, countEnd)) {
+                val pkg = b.packageName ?: continue
+                if (isJunkPackage(pkg)) continue
+                if (b.lastTimeStamp <= dayStart || b.firstTimeStamp >= countEnd) continue
+                val t = b.totalTimeInForeground
+                if (t > (statsMs[pkg] ?: 0L)) statsMs[pkg] = t
+            }
+
+            /* ---- Fuse: max of the two per app, capped at elapsed in day ---- */
+
+            val perApp = mutableMapOf<String, Long>()
+            for (pkg in (eventsMs.keys + statsMs.keys)) {
+                val byEvents = (eventsMs[pkg] ?: 0L).coerceAtMost(elapsedInDay)
+                val byStats = (statsMs[pkg] ?: 0L).coerceAtMost(elapsedInDay)
+                val honest = maxOf(byEvents, byStats)
+                if (honest > 0) perApp[pkg] = honest
+            }
+
+            val totalMs = perApp.values.sum().coerceAtMost(elapsedInDay)
+            val topApp = perApp.maxByOrNull { it.value }?.key
 
             val limit = call.getInt("limit") ?: 0
             val pm = context.packageManager
             val apps = JSArray()
-            val sorted = totalMsByPkg.entries.sortedByDescending { it.value }
+            val sorted = perApp.entries.sortedByDescending { it.value }
             val scoped = if (only != null) sorted.filter { it.key in only } else sorted
             val shown = if (limit > 0) scoped.take(limit) else scoped
             shown.forEach { (pkg, ms) ->
