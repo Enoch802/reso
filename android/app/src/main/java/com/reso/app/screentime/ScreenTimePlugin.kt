@@ -27,17 +27,14 @@ import java.util.TimeZone
  * ScreenTime — native bridge over Android's UsageStatsManager.
  *
  * Usage is computed purely from the event stream, clipped to
- * [dayStart, min(dayEnd, now)]. Two correctness mechanisms replace the
- * stats-reconciliation approach (which undercounted on devices with lazy
- * bucket flushing):
- *
- * 1. Sessions crossing midnight INTO the queried day are caught by looking
- *    back one day for their foreground event.
- * 2. Many devices never emit a background event when a process is cached or
- *    evicted, leaving sessions "open" since their launch — inflating them to
- *    hours of phantom use. Those sessions are closed at the first
- *    SCREEN_NON_INTERACTIVE event (apps cannot stay foreground once the
- *    screen is off), and any still open at "now" is clipped to now.
+ * [dayStart, min(dayEnd, now)]. Sessions are closed by ANY of:
+ *   - a background event (PAUSED/STOPPED/MOVE_TO_BACKGROUND),
+ *   - a new foreground event for any app (single-window assumption — devices
+ *     that skip PAUSED on task switch would otherwise leave sessions dangling),
+ *   - a SCREEN_NON_INTERACTIVE event (nothing can stay foreground once the
+ *     screen is off),
+ *   - "now" for whatever is still open (live reads).
+ * This needs only RESUMED + screen events, which all devices emit.
  */
 @CapacitorPlugin(name = "ScreenTime")
 class ScreenTimePlugin : Plugin() {
@@ -66,7 +63,7 @@ class ScreenTimePlugin : Plugin() {
         if (pkg == context.packageName) return true                    // Reso itself
         if (pkg == "com.android.systemui") return true
         if (pkg.startsWith("com.android.launcher")) return true
-        if (pkg.endsWith(".launcher")) return true
+        if (pkg.endsWith(".launcher")) return true                     // Nova, Microsoft, etc.
         if (pkg.contains("inputmethod") || pkg.contains("keyboard")) return true
         if (pkg == "com.google.android.webview" || pkg == "com.android.webview") return true
         return false
@@ -166,31 +163,31 @@ class ScreenTimePlugin : Plugin() {
                 if (e > s) totalMsByPkg[pkg] = (totalMsByPkg[pkg] ?: 0L) + (e - s)
             }
 
+            fun closeAll(at: Long) {
+                for ((pkg, start) in openedAt) closeSession(pkg, start, at)
+                openedAt.clear()
+            }
+
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
                 val pkg = event.packageName ?: continue
                 val ts = event.timeStamp
                 when {
                     isForeground(event.eventType) -> {
+                        // Whether the incoming app is real or a system component
+                        // (launcher, keyboard), it ends every open session.
+                        closeAll(ts)
                         if (!isJunkPackage(pkg)) openedAt[pkg] = ts
                     }
                     isBackground(event.eventType) -> {
                         val start = openedAt.remove(pkg)
                         if (start != null) closeSession(pkg, start, ts)
                     }
-                    isScreenOff(event.eventType) -> {
-                        // Screen off = nothing can remain foreground. Close every
-                        // open session here — this is what defuses the dangling
-                        // RESUMED events this device's OEM never closes.
-                        for ((pkg2, start) in openedAt) closeSession(pkg2, start, ts)
-                        openedAt.clear()
-                    }
+                    isScreenOff(event.eventType) -> closeAll(ts)
                 }
             }
             // Still open at "now" (device currently in use): clip to now.
-            for ((pkg, start) in openedAt) {
-                closeSession(pkg, start, countEnd)
-            }
+            closeAll(countEnd)
 
             val totalMs = totalMsByPkg.values.sum().coerceAtMost(countEnd - dayStart)
             val topApp = totalMsByPkg.maxByOrNull { it.value }?.key
