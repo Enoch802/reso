@@ -71,11 +71,19 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
-    <!-- Intent filter for file sharing on Android 11+ -->
+    <!-- Intent filter for file sharing on Android 11+, plus visibility into
+         other installed apps so Screen Time can resolve their real name and
+         icon (without this, apps not already known to the system — like
+         eFootball, jp.konami.pesam — fall back to showing the raw package
+         name, since Android 11+ hides other apps' details by default). -->
     <queries>
         <intent>
             <action android:name="android.intent.action.SEND" />
             <data android:mimeType="text/plain" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
         </intent>
     </queries>
 
