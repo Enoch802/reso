@@ -32,17 +32,33 @@ import java.util.TimeZone
  *     top_app: string | null,
  *     apps: [{ package, app_name, minutes, icon }]  // heaviest first, icons as base64 PNG
  *   }
+ *
+ * Usage is computed from the raw event stream (foreground/background pairs),
+ * clipped strictly to [dayStart, dayEnd) — and for live "today" reads, to
+ * "now". queryUsageStats(INTERVAL_DAILY) is deliberately NOT used: its
+ * totalTimeInForeground can drift far beyond a real day on some devices when
+ * the query window doesn't align with internal bucket boundaries, producing
+ * impossible totals.
  */
 @CapacitorPlugin(name = "ScreenTime")
 class ScreenTimePlugin : Plugin() {
 
     private fun hasUsageAccess(): Boolean {
         val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-        val mode = appOps.unsafeCheckOpNoThrow(
-            AppOpsManager.OPSTR_GET_USAGE_STATS,
-            Process.myUid(),
-            context.packageName
-        )
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            appOps.unsafeCheckOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS,
+                Process.myUid(),
+                context.packageName
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            appOps.checkOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS,
+                Process.myUid(),
+                context.packageName
+            )
+        }
         return mode == AppOpsManager.MODE_ALLOWED
     }
 
@@ -99,18 +115,19 @@ class ScreenTimePlugin : Plugin() {
             val dayStart = fmt.parse(dateStr)!!.time
             val dayEnd = dayStart + 86_400_000L
 
-            // NOTE: queryUsageStats(INTERVAL_DAILY, ...) is intentionally NOT used here.
-            // Its totalTimeInForeground numbers can drift far beyond a real day's worth
-            // of minutes on some devices/OS versions when the query window doesn't line
-            // up exactly with the system's internal bucket boundaries — that's what was
-            // producing impossible totals like 800+ hours for a single day. Computing
-            // usage ourselves from the raw event stream, clipped strictly to
-            // [dayStart, dayEnd), is the reliable approach and can't drift that way.
+            // A live "today" read must never count time that hasn't happened yet.
+            val countEnd = minOf(dayEnd, System.currentTimeMillis())
+
+            // Look back one day so a session that crossed midnight into the
+            // queried day (opened 23:50, closed 00:10) still gets its
+            // in-day portion counted instead of silently dropping.
+            val windowStart = dayStart - 86_400_000L
+
             val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
-            val events = usm.queryEvents(dayStart, dayEnd)
+            val events = usm.queryEvents(windowStart, dayEnd)
             val event = UsageEvents.Event()
 
-            val openedAt = mutableMapOf<String, Long>() // package -> timestamp it came to foreground
+            val openedAt = mutableMapOf<String, Long>() // package -> raw foreground timestamp
             val totalMsByPkg = mutableMapOf<String, Long>()
 
             fun isForegroundEvent(type: Int) =
@@ -119,30 +136,37 @@ class ScreenTimePlugin : Plugin() {
 
             fun isBackgroundEvent(type: Int) =
                 type == UsageEvents.Event.MOVE_TO_BACKGROUND ||
-                (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && type == UsageEvents.Event.ACTIVITY_PAUSED)
+                (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && type == UsageEvents.Event.ACTIVITY_PAUSED) ||
+                (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && type == UsageEvents.Event.ACTIVITY_STOPPED)
+
+            fun addSession(pkg: String, rawStart: Long, rawEnd: Long) {
+                val s = maxOf(rawStart, dayStart)
+                val e = minOf(rawEnd, dayEnd)
+                if (e > s) {
+                    totalMsByPkg[pkg] = (totalMsByPkg[pkg] ?: 0L) + (e - s)
+                }
+            }
 
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
                 val pkg = event.packageName ?: continue
-                val ts = event.timeStamp.coerceIn(dayStart, dayEnd)
+                val ts = event.timeStamp
                 when {
                     isForegroundEvent(event.eventType) -> {
                         openedAt[pkg] = ts
                     }
                     isBackgroundEvent(event.eventType) -> {
                         val start = openedAt.remove(pkg)
-                        if (start != null && ts > start) {
-                            totalMsByPkg[pkg] = (totalMsByPkg[pkg] ?: 0L) + (ts - start)
-                        }
+                        if (start != null) addSession(pkg, start, ts)
                     }
                 }
             }
-            // Anything still open at day's end was foreground when the window closed —
-            // count up to dayEnd, not beyond it.
+            // Anything still open when the window closed. For past days the app
+            // genuinely stayed foreground through midnight; for today the clip
+            // to `countEnd` (now) keeps a currently-open app — including Reso
+            // itself, mid-read — honest instead of inflating it to midnight.
             for ((pkg, start) in openedAt) {
-                if (dayEnd > start) {
-                    totalMsByPkg[pkg] = (totalMsByPkg[pkg] ?: 0L) + (dayEnd - start)
-                }
+                addSession(pkg, start, countEnd)
             }
 
             val totalMs = totalMsByPkg.values.sum().coerceAtMost(86_400_000L)
