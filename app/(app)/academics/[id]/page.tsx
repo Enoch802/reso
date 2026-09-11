@@ -76,7 +76,7 @@ export default function CourseDetailPage() {
 
       {/* Topics tracker */}
       <GlassCard className="p-5 animate-fade-up [animation-delay:210ms]">
-        <SectionHeader icon={<ListChecks size={19} aria-hidden />} title="Topic coverage"  />
+        <SectionHeader icon={<ListChecks size={19} aria-hidden />} title="Topic coverage" />
         <form onSubmit={(e) => { e.preventDefault(); addTopic(); }} className="flex gap-2">
           <input
             value={newTopic}
@@ -98,9 +98,6 @@ export default function CourseDetailPage() {
                 { value: topicCounts.untouched, className: "bg-black/10 dark:bg-white/10", label: "untouched" },
               ]}
             />
-            <p className="text-xs text-[var(--ink-faint)] mt-1.5">
-              {topicCounts.read} read, {topicCounts.revising} revising, {topicCounts.reading} reading, {topicCounts.untouched} untouched
-            </p>
             <ul className="mt-4 space-y-2">
               {(topics ?? []).map((t) => (
                 <li key={t.id} className="flex items-center gap-2.5">
@@ -133,23 +130,21 @@ export default function CourseDetailPage() {
           </div>
         )}
         {(topics ?? []).length === 0 && (
-          <EmptyState icon={<ListChecks size={22} aria-hidden />} title="No topics yet"  />
+          <EmptyState icon={<ListChecks size={22} aria-hidden />} title="No topics yet" />
         )}
       </GlassCard>
 
       {/* Ask Reso about this course */}
       <GlassCard className="p-5 animate-fade-up [animation-delay:230ms]">
-        <SectionHeader icon={<MessageCircleHeart size={19} aria-hidden />} title="Ask about this course" sub="Tests, revision, what to do next — it knows this course's details." />
+        <SectionHeader icon={<MessageCircleHeart size={19} aria-hidden />} title="Ask about this course" />
         <CoachChat courseId={courseId} />
       </GlassCard>
 
-      {/* Weekly schedule — pushed in automatically by the class timetable upload */}
+      {/* Weekly schedule */}
       <GlassCard className="p-5 animate-fade-up [animation-delay:235ms]">
-        <SectionHeader icon={<Clock3 size={19} aria-hidden />} title="Weekly schedule" sub="Filled in automatically when you upload your class timetable." />
+        <SectionHeader icon={<Clock3 size={19} aria-hidden />} title="Weekly schedule" />
         {(slots ?? []).length === 0 ? (
-          <p className="text-sm text-[var(--ink-soft)]">
-            No class times yet — upload the timetable in Settings and this course's weekly times appear here on their own. Reminders follow them automatically.
-          </p>
+          <p className="text-sm text-[var(--ink-soft)]">No class times yet.</p>
         ) : (
           <ul className="space-y-2">
             {(slots ?? []).slice().sort((a, b) => a.day_of_week - b.day_of_week || a.start_time.localeCompare(b.start_time)).map((sl) => (
@@ -166,7 +161,6 @@ export default function CourseDetailPage() {
       <GlassCard className="p-5 animate-fade-up [animation-delay:260ms]">
         <SectionHeader icon={<CalendarDays size={19} aria-hidden />} title="Exam" />
         <ExamEditor courseId={courseId} exam={exam} />
-        {exam && <p className="text-sm text-[var(--ink-soft)] mt-3">Set for {prettyDate(exam.exam_date)}{exam.start_time ? ` at ${exam.start_time}` : ""}{exam.venue ? `, ${exam.venue}` : ""}.</p>}
       </GlassCard>
     </div>
   );
