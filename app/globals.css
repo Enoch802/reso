@@ -427,3 +427,11 @@ input::placeholder, textarea::placeholder {
     scroll-behavior: auto !important;
   }
 }
+html {
+  background-color: #f2f2f7;
+  color-scheme: light;
+}
+html.dark {
+  background-color: #17161d;
+  color-scheme: dark;
+}
