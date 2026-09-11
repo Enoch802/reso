@@ -79,7 +79,7 @@ export default function DigestPage() {
       const { digest } = await aiDigest(aiInput);
       await db.weekly_digests.add({ week_start_date: thisWeekStart, digest_text: digest, created_at: Date.now() });
     } catch {
-      setError("The writer couldn't be reached just now. Nothing was lost — try again in a moment.");
+      setError("Couldn't reach the writer — try again in a moment.");
     } finally {
       setBusy(false);
     }
@@ -90,7 +90,6 @@ export default function DigestPage() {
       <div className="flex items-end justify-between gap-4 animate-fade-up">
         <div>
           <h1 className="font-serif text-3xl sm:text-4xl tracking-tight text-[var(--ink)]">Weekly letters</h1>
-          <p className="text-sm text-[var(--ink-soft)] mt-1">What Reso noticed, said once a week, kindly.</p>
         </div>
         <NeoButton variant="accent" onClick={generate} disabled={busy} className="font-semibold shrink-0">
           <span className="inline-flex items-center gap-2">{busy ? <Loader2 size={16} className="animate-spin" aria-hidden /> : <Sparkles size={16} aria-hidden />} Write this week's</span>
@@ -101,7 +100,7 @@ export default function DigestPage() {
         <GlassCard className="p-5 animate-fade-up flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <span className="neo-sm w-11 h-11 rounded-xl flex items-center justify-center text-[var(--accent)]" aria-hidden><Award size={20} /></span>
-            <p className="text-sm text-[var(--ink-soft)]">This semester has ended — your recap keepsake is ready.</p>
+            <p className="text-sm text-[var(--ink-soft)]">Your semester has ended.</p>
           </div>
           <NeoButton onClick={() => setRecapOpen(true)} className="shrink-0 font-semibold">View recap</NeoButton>
         </GlassCard>
@@ -114,7 +113,6 @@ export default function DigestPage() {
           <EmptyState
             icon={<ScrollText size={26} aria-hidden />}
             title="No letters yet"
-            sub="Live your week — then come Sunday, ask Reso to write it down. Your biggest want-leak, best streak, and one gentle thought."
           />
         </GlassCard>
       )}
