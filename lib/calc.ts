@@ -129,6 +129,39 @@ export function routineScore(routines: Routine[], logs: RoutineLog[], date: stri
   return (done / scheduled.length) * 100;
 }
 
+// NEW — Screen-time pillar. Scores the previous COMPLETE day against the
+// user's daily goal: 100 at or under goal, falling linearly to 0 at 2× goal.
+// null = not scored (no goal set, no stored data, or tracking just enabled) —
+// the pillar is then excluded from the ring average, like the others.
+// Deliberately takes yesterday's stored minutes, never today's live partial:
+// a partial day would read as green all morning regardless of usage.
+export function screenTimeScore(yesterdayMinutes: number | null | undefined, goalMinutes: number): number | null {
+  if (goalMinutes <= 0) return null;
+  if (yesterdayMinutes == null) return null;
+  if (yesterdayMinutes <= goalMinutes) return 100; // 0 minutes counts — it's the goal
+  return Math.max(0, Math.round(100 * (2 - yesterdayMinutes / goalMinutes)));
+}
+
+// NEW — Consecutive completed days at or under goal, ending yesterday.
+// (Today is partial, so it never counts — same honesty rule.) A day with no
+// stored data ends the streak rather than silently skipping it.
+export function screenTimeStreak(logs: DailyLog[], goalMinutes: number): number {
+  if (goalMinutes <= 0) return 0;
+  const byDate = new Map<string, number | null>();
+  for (const l of logs) {
+    byDate.set(l.date, typeof l.screen_time_minutes === "number" ? l.screen_time_minutes : null);
+  }
+  let streak = 0;
+  let d = addDays(todayStr(), -1);
+  for (let i = 0; i < 400; i++) {
+    const m = byDate.get(d);
+    if (m == null || m > goalMinutes) break;
+    streak++;
+    d = addDays(d, -1);
+  }
+  return streak;
+}
+
 export function routineStreak(routine: Routine, logs: RoutineLog[]): number {
   // Count consecutive "done" days ending today/yesterday (only scheduled days count).
   const byDate = new Map<string, "done" | "skipped" | "unlogged">();
