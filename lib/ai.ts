@@ -1,6 +1,26 @@
 "use client";
 
-/** Client helpers for the app's stateless AI routes. All data stays local; routes retain nothing. */
+/**
+ * Client helpers for the app's stateless AI routes. All data stays local; routes retain nothing.
+ *
+ * These routes exist only on the Vercel deployment (no server inside the
+ * Android app), so calls go to the absolute API base. Offline, they fail
+ * fast with `offline` / `ai-unavailable` — callers already catch and degrade
+ * gracefully, so every AI feature is optional-by-design.
+ */
+
+const API_BASE = "https://reso-pnjj.vercel.app";
+
+function online(): boolean {
+  return typeof navigator === "undefined" ? true : navigator.onLine;
+}
+
+function withBase(path: string): string {
+  // In the browser/PWA, relative keeps same-origin (and any dev proxy).
+  // In the bundled Android app, the absolute Vercel URL is required.
+  if (typeof window !== "undefined" && !("Capacitor" in window)) return path;
+  return `${API_BASE}${path}`;
+}
 
 export interface ParsedReflection {
   reply: string;
@@ -11,7 +31,8 @@ export interface ParsedReflection {
 }
 
 export async function aiChat(userText: string, context: string): Promise<ParsedReflection> {
-  const res = await fetch("/api/ai", {
+  if (!online()) throw new Error("offline");
+  const res = await fetch(withBase("/api/ai"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ mode: "chat", text: userText, context }),
@@ -35,7 +56,8 @@ export interface DigestInput {
 }
 
 export async function aiDigest(input: DigestInput): Promise<{ digest: string }> {
-  const res = await fetch("/api/ai", {
+  if (!online()) throw new Error("offline");
+  const res = await fetch(withBase("/api/ai"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ mode: "digest", input }),
@@ -57,7 +79,8 @@ export async function aiParseTimetable(
   dataUrl: string,
   kind: "class" | "exam" | "study"
 ): Promise<ParsedTimetableRow[]> {
-  const res = await fetch("/api/timetable-parse", {
+  if (!online()) throw new Error("offline");
+  const res = await fetch(withBase("/api/timetable-parse"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ image: dataUrl, kind }),
@@ -77,7 +100,8 @@ export interface RankedEmail {
 
 /** Ask the email route to fetch + rank new mail for one account (server-side Gmail API). */
 export async function fetchRankedEmails(account: { access_token: string; refresh_token: string | null; token_expires_at: number; last_fetched_at: number | null }): Promise<{ items: RankedEmail[]; accessToken?: string; expiresAt?: number }> {
-  const res = await fetch("/api/email", {
+  if (!online()) throw new Error("offline");
+  const res = await fetch(withBase("/api/email"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(account),
