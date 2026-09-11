@@ -17,6 +17,7 @@ import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
+import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -27,18 +28,23 @@ import java.util.TimeZone
  *
  *   checkPermission()            -> { granted: boolean }
  *   openPermissionSettings()     -> void
- *   getScreenTimeMinutes({date, limit?}) -> {
- *     minutes: number | null,     // total across ALL apps
+ *   getScreenTimeMinutes({date, limit?, icons?, only?}) -> {
+ *     minutes: number | null,     // total across ALL non-system apps
  *     top_app: string | null,
- *     apps: [{ package, app_name, minutes, icon }]  // heaviest first, icons as base64 PNG
+ *     apps: [{ package, app_name, minutes, icon }]  // heaviest first
  *   }
+ *
+ * Params:
+ *   limit  — max apps in the breakdown (0 = all). Total always covers everything.
+ *   icons  — default true. Pass false for cheap frequent polls (live "today");
+ *            the web layer caches icons and fetches unknowns via `only`.
+ *   only   — comma-separated package list; restricts the breakdown to those
+ *            packages (used for icon-only fetches).
  *
  * Usage is computed from the raw event stream (foreground/background pairs),
  * clipped strictly to [dayStart, dayEnd) — and for live "today" reads, to
- * "now". queryUsageStats(INTERVAL_DAILY) is deliberately NOT used: its
- * totalTimeInForeground can drift far beyond a real day on some devices when
- * the query window doesn't align with internal bucket boundaries, producing
- * impossible totals.
+ * "now". System components (launchers, SystemUI, keyboards, webview, Reso
+ * itself) are excluded from both totals and the per-app list.
  */
 @CapacitorPlugin(name = "ScreenTime")
 class ScreenTimePlugin : Plugin() {
@@ -60,6 +66,17 @@ class ScreenTimePlugin : Plugin() {
             )
         }
         return mode == AppOpsManager.MODE_ALLOWED
+    }
+
+    /** System components that aren't real "app usage" — matches Digital Wellbeing's spirit. */
+    private fun isJunkPackage(pkg: String): Boolean {
+        if (pkg == context.packageName) return true                    // Reso itself
+        if (pkg == "com.android.systemui") return true
+        if (pkg.startsWith("com.android.launcher")) return true        // AOSP launchers
+        if (pkg.endsWith(".launcher")) return true                     // Nova, Microsoft, etc.
+        if (pkg.contains("inputmethod") || pkg.contains("keyboard")) return true // IMEs
+        if (pkg == "com.google.android.webview" || pkg == "com.android.webview") return true
+        return false
     }
 
     /** App icon as a downscaled base64 PNG, so the web side gets logos without file access. */
@@ -118,10 +135,13 @@ class ScreenTimePlugin : Plugin() {
             // A live "today" read must never count time that hasn't happened yet.
             val countEnd = minOf(dayEnd, System.currentTimeMillis())
 
-            // Look back one day so a session that crossed midnight into the
-            // queried day (opened 23:50, closed 00:10) still gets its
-            // in-day portion counted instead of silently dropping.
+            // Look back one day so a session crossing midnight into the queried
+            // day (opened 23:50, closed 00:10) still gets its in-day portion.
             val windowStart = dayStart - 86_400_000L
+
+            val includeIcons = call.getBoolean("icons", true)
+            val only: Set<String>? = call.getString("only")
+                ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet()
 
             val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
             val events = usm.queryEvents(windowStart, dayEnd)
@@ -150,6 +170,7 @@ class ScreenTimePlugin : Plugin() {
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
                 val pkg = event.packageName ?: continue
+                if (isJunkPackage(pkg)) continue
                 val ts = event.timeStamp
                 when {
                     isForegroundEvent(event.eventType) -> {
@@ -161,35 +182,32 @@ class ScreenTimePlugin : Plugin() {
                     }
                 }
             }
-            // Anything still open when the window closed. For past days the app
-            // genuinely stayed foreground through midnight; for today the clip
-            // to `countEnd` (now) keeps a currently-open app — including Reso
-            // itself, mid-read — honest instead of inflating it to midnight.
+            // Still-open sessions: clip to `countEnd` so a live read of "today"
+            // counts the currently-open app's real elapsed time, not to midnight.
             for ((pkg, start) in openedAt) {
                 addSession(pkg, start, countEnd)
             }
 
+            val scoped = if (only != null) totalMsByPkg.filterKeys { it in only } else totalMsByPkg
             val totalMs = totalMsByPkg.values.sum().coerceAtMost(86_400_000L)
-            val topApp = totalMsByPkg.maxByOrNull { it.value }?.key
+            val topApp = scoped.maxByOrNull { it.value }?.key
 
             val limit = call.getInt("limit") ?: 0
             val pm = context.packageManager
             val apps = JSArray()
-            val sorted = totalMsByPkg.entries.sortedByDescending { it.value }
+            val sorted = scoped.entries.sortedByDescending { it.value }
             val shown = if (limit > 0) sorted.take(limit) else sorted
             shown.forEach { (pkg, ms) ->
                 val label = try {
                     pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
                 } catch (e: Exception) {
-                    // Still couldn't resolve it (e.g. no launcher activity) —
-                    // show a readable guess instead of the raw dotted package id.
                     pkg.substringAfterLast('.').replaceFirstChar { it.uppercase() }
                 }
                 val o = JSObject()
                 o.put("package", pkg)
                 o.put("app_name", label)
                 o.put("minutes", (ms / 60_000.0).toInt())
-                o.put("icon", encodeIcon(pkg))
+                o.put("icon", if (includeIcons) encodeIcon(pkg) else JSONObject.NULL)
                 apps.put(o)
             }
 
