@@ -19,6 +19,7 @@ import { Filesystem, Directory } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
 import { fetchRankedEmails } from "@/lib/ai";
 import { screenTimeAvailable, screenTimePermission, openScreenTimeSettings, pullYesterdayScreenTime } from "@/lib/screentime";
+import ImportData from "@/components/ImportData";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -544,6 +545,12 @@ function DataModal({ open, onClose }: { open: boolean; onClose: () => void }) {
                 }
               }}
             >Export</NeoButton>
+          </div>
+          <div className="flex items-center justify-between gap-3 rounded-2xl neo p-4">
+            <div>
+              <p className="font-medium text-[var(--ink)] text-sm flex items-center gap-2"><Download size={15} aria-hidden /> Import my data</p>
+            </div>
+            <ImportData onDone={(m) => alert(m)} />
           </div>
           <div className="flex items-center justify-between gap-3 rounded-2xl neo p-4">
             <div>
