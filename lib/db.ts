@@ -168,6 +168,8 @@ export interface DailyLog {
 export interface ScreentimeTracking {
   id?: number; // always 0 — single settings row
   enabled: 0 | 1;
+  /** Daily screen-time goal in minutes; default 300 (5h) when absent. */
+  daily_goal_minutes?: number; // ← NEW
 }
 
 export interface ChatMessage {
@@ -184,6 +186,8 @@ export interface DisciplineScore {
   academic_score: number | null;
   finance_score: number | null;
   routine_score: number | null;
+  /** Fourth pillar: yesterday's usage vs the daily goal. Optional — absent on rows from before it existed. */
+  screen_time_score?: number | null; // ← NEW
   overall_score: number | null;
 }
 
@@ -350,9 +354,10 @@ export async function getScreenTimeEnabled(): Promise<0 | 1> {
   return row?.enabled ?? 0;
 }
 
-/** Set the screen time tracking enabled state. */
+/** Set the screen time tracking enabled state, preserving any stored goal. */
 export async function setScreenTimeEnabled(enabled: 0 | 1) {
-  await db.screentime_tracking.put({ id: 0, enabled });
+  const row = await db.screentime_tracking.get(0); // ← NEW: spread instead of fresh object
+  await db.screentime_tracking.put({ ...row, id: 0, enabled });
 }
 
 export async function getProfile(): Promise<Profile | undefined> {
