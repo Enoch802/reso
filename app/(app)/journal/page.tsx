@@ -18,6 +18,25 @@ interface SpeechRecognitionLike {
   onend: (() => void) | null;
 }
 
+interface CapSpeechPlugin {
+  available(): Promise<{ available: boolean }>;
+  start(o: {
+    language: string;
+    maxMatches: number;
+    prompt: string;
+    partialResults: boolean;
+    popup?: boolean;
+  }, callback?: (data: { matches: string[] }) => void): Promise<{ matches: string[] }>;
+  stop(): Promise<void>;
+}
+
+function speechPlugin(): CapSpeechPlugin | null {
+  if (typeof window === "undefined") return null;
+  const cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean; Plugins?: Record<string, unknown> } }).Capacitor;
+  if (!cap?.isNativePlatform?.()) return null;
+  return (cap.Plugins as Record<string, CapSpeechPlugin>)?.SpeechRecognition ?? null;
+}
+
 export default function JournalPage() {
   const today = useToday();
   const [draft, setDraft] = useState("");
@@ -155,8 +174,41 @@ export default function JournalPage() {
       ?? (courses ?? []).find((c) => c.title.toUpperCase().includes(h));
   }
 
-  function toggleVoice() {
-    if (listening) { recRef.current?.stop(); return; }
+  async function toggleVoice() {
+    if (listening) {
+      recRef.current?.stop();
+      try { await speechPlugin()?.stop(); } catch { /* noop */ }
+      setListening(false);
+      return;
+    }
+
+    // Native path (Android app): the WebView lacks the browser Speech API,
+    // so use the native speech recognition plugin.
+    const native = speechPlugin();
+    if (native) {
+      try {
+        const { available } = await native.available();
+        if (!available) { setError("No speech recognition on this device."); return; }
+        setListening(true);
+        setError(null);
+        const result = await native.start({
+          language: "en-US",
+          maxMatches: 1,
+          prompt: "Speak now",
+          partialResults: false,
+          popup: true,
+        });
+        const text = result?.matches?.[0]?.trim();
+        if (text) setDraft((prev) => (prev ? `${prev} ${text}`.trim() : text));
+      } catch {
+        setError("Voice didn't complete — try again.");
+      } finally {
+        setListening(false);
+      }
+      return;
+    }
+
+    // Web path (browser/PWA): the classic SpeechRecognition API.
     const W = window as unknown as { SpeechRecognition?: new () => SpeechRecognitionLike; webkitSpeechRecognition?: new () => SpeechRecognitionLike };
     const SR = W.SpeechRecognition ?? W.webkitSpeechRecognition;
     if (!SR) { setError("Voice isn't available here."); return; }
@@ -171,6 +223,7 @@ export default function JournalPage() {
     rec.onend = () => setListening(false);
     recRef.current = rec;
     setListening(true);
+    setError(null);
     rec.start();
   }
 
@@ -227,13 +280,13 @@ export default function JournalPage() {
         {error && <p className="text-sm text-amber-600 dark:text-amber-300 mt-2">{error}</p>}
 
         <form
-          onSubmit={(e) => { e.preventDefault(); send(); }}
+          onSubmit={(e) => { e.preventDefault(); void send(); }}
           className="pt-3 mt-2 sticky bottom-0"
         >
           <div className="flex gap-2 items-center">
             <button
               type="button"
-              onClick={toggleVoice}
+              onClick={() => void toggleVoice()}
               aria-label={listening ? "Stop voice input" : "Start voice input"}
               aria-pressed={listening}
               className={`focus-ring shrink-0 w-[52px] h-[52px] rounded-xl flex items-center justify-center transition-all ${listening ? "neo-pressed text-rose-500" : "neo text-[var(--accent)]"}`}
