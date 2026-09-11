@@ -119,7 +119,7 @@ export default function AcademicsPage() {
         )}
         <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {filtered.map((row, i) => (
-            <Link key={row.course.id} href={`/academics/${row.course.id}`} className="focus-ring block animate-fade-up" style={{ animationDelay: `${i * 70}ms` }}>
+            <Link key={row.course.id} href={`/academics/course?id=${row.course.id}`} className="focus-ring block animate-fade-up" style={{ animationDelay: `${i * 70}ms` }}>
               <GlassCard className="p-5 h-full hover:-translate-y-1 transition-transform">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
