@@ -70,47 +70,60 @@ export default function ScreenTimePage() {
 
   // Live pull of today's running total — separate from the once-a-day
   // historical pull, so the hero number reflects "so far today".
+  // Refreshes every 60s while the page is open, and instantly whenever the
+  // app returns to the foreground — always up to date.
   useEffect(() => {
     let alive = true;
-    (async () => {
+    const fetchLive = async () => {
       if (!screenTimeAvailable() || enabled?.enabled !== 1) { setLive(null); return; }
       const p = await screenTimePermission();
       if (p !== "granted") { setLive(null); return; }
       const result = await getTodayScreenTimeLive();
       if (alive) setLive(result);
-    })();
-    return () => { alive = false; };
+    };
+    fetchLive();
+    const iv = setInterval(fetchLive, 60_000);
+    const onVis = () => { if (document.visibilityState === "visible") fetchLive(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      alive = false;
+      clearInterval(iv);
+      document.removeEventListener("visibilitychange", onVis);
+    };
   }, [enabled?.enabled, today]);
 
-  const recentDays = screenTime?.slice(0, 14) ?? [];
+  // Completed days for the trend — legacy corrupt rows (> 1440 min, from the
+  // old bucket-span bug) are excluded everywhere below.
+  const completedDays = useMemo(() => {
+    return (screenTime ?? [])
+      .filter((r) =>
+        typeof r.screen_time_minutes === "number" &&
+        (r.screen_time_minutes as number) > 0 &&
+        (r.screen_time_minutes as number) <= 1440
+      )
+      .map((r) => ({ date: r.date, minutes: r.screen_time_minutes as number }));
+  }, [screenTime]);
+
   const chartData = useMemo(() => {
-    const data = recentDays.map((r) => ({
-      date: r.date,
-      minutes: r.screen_time_minutes ?? null,
-    }));
     const result = [];
-    let i = 0;
-    for (let day = 0; day < 14; day++) {
-      const d = new Date(todayStr());
-      d.setDate(d.getDate() - day);
-      const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-      if (i < data.length && data[i]?.date === ds) {
-        result.push(data[i]);
-        i++;
-      } else {
-        result.push({ date: ds, minutes: null });
-      }
+    for (let day = 13; day >= 0; day--) {
+      const ds = addDays(todayStr(), -day);
+      const stored = completedDays.find((d) => d.date === ds);
+      let minutes = stored?.minutes ?? null;
+      // Today's bar shows the LIVE running total — always up to date.
+      if (ds === todayStr() && live?.minutes != null) minutes = live.minutes;
+      result.push({ date: ds, minutes, isToday: ds === todayStr() });
     }
-    return result.reverse(); // oldest -> newest, left to right
-  }, [recentDays, today]);
+    return result;
+  }, [completedDays, live, today]);
 
   // Rolling average over completed days only (today is partial, excluded on purpose).
   const avgMinutes = useMemo(() => {
-    const valid = chartData.filter((d) => d.minutes !== null);
+    const valid = completedDays.filter((d) => d.date !== todayStr());
     if (valid.length === 0) return null;
-    const sum = valid.reduce((a, d) => a + d.minutes!, 0);
+    const sum = valid.reduce((a, d) => a + d.minutes, 0);
     return Math.round(sum / valid.length);
-  }, [chartData]);
+  }, [completedDays]);
 
   const maxMinutes = useMemo(() => {
     const valid = chartData.filter((d) => d.minutes !== null);
@@ -188,32 +201,29 @@ export default function ScreenTimePage() {
             />
           )}
           <div className="relative h-full flex items-end justify-between gap-2 sm:gap-4">
-            {chartData.map((d) => {
-              const isToday = d.date === todayStr();
-              return (
-                <div key={d.date} className="flex-1 flex flex-col items-center gap-1 group h-full justify-end">
-                  <div className="relative w-full max-w-[48px]">
-                    <div
-                      className="w-full rounded-t-lg transition-all duration-300"
-                      style={{
-                        height: d.minutes === null ? 4 : Math.max(4, (d.minutes / maxValue) * 140),
-                        background: isToday
-                          ? "var(--accent)"
-                          : "color-mix(in srgb, var(--accent) 65%, transparent)",
-                      }}
-                    />
-                    {d.minutes !== null && (
-                      <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-[var(--neo-base)] dark:bg-[var(--neo-base-dark)] px-2 py-1 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity text-xs font-medium whitespace-nowrap">
-                        {fmtDur(d.minutes)}
-                      </div>
-                    )}
-                  </div>
-                  <span className={`text-[10px] sm:text-xs ${isToday ? "text-[var(--ink)] font-semibold" : "text-[var(--ink-faint)]"}`}>
-                    {DAY_SHORT[new Date(d.date).getDay()]}
-                  </span>
+            {chartData.map((d) => (
+              <div key={d.date} className="flex-1 flex flex-col items-center gap-1 group h-full justify-end">
+                <div className="relative w-full max-w-[48px]">
+                  <div
+                    className="w-full rounded-t-lg transition-all duration-300"
+                    style={{
+                      height: d.minutes === null ? 4 : Math.max(4, (d.minutes / maxValue) * 140),
+                      background: d.isToday
+                        ? "var(--accent)"
+                        : "color-mix(in srgb, var(--accent) 65%, transparent)",
+                    }}
+                  />
+                  {d.minutes !== null && (
+                    <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-[var(--neo-base)] dark:bg-[var(--neo-base-dark)] px-2 py-1 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity text-xs font-medium whitespace-nowrap">
+                      {fmtDur(d.minutes)}
+                    </div>
+                  )}
                 </div>
-              );
-            })}
+                <span className={`text-[10px] sm:text-xs ${d.isToday ? "text-[var(--ink)] font-semibold" : "text-[var(--ink-faint)]"}`}>
+                  {d.isToday ? "Today" : DAY_SHORT[new Date(d.date).getDay()]}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
         <div className="mt-4 flex justify-between items-center text-xs text-[var(--ink-faint)]">
@@ -288,10 +298,37 @@ export default function ScreenTimePage() {
     );
   }
 
+  if (perm === "denied") {
+    return (
+      <div className="space-y-6 pb-8 max-w-3xl mx-auto">
+        <div className="animate-fade-up">
+          <h1 className="font-serif text-3xl sm:text-4xl tracking-tight text-[var(--ink)]">Screen time</h1>
+          <p className="text-sm text-[var(--ink-soft)] mt-1">{prettyDate(today)}</p>
+        </div>
+
+        <GlassCard className="p-6">
+          <div className="flex items-center gap-4 mb-4">
+            <span className="neo-sm w-11 h-11 rounded-xl flex items-center justify-center text-[var(--accent)] shrink-0" aria-hidden>
+              <Hourglass size={19} />
+            </span>
+            <div>
+              <h2 className="font-medium text-[var(--ink)]">Usage access needed</h2>
+              <p className="text-sm text-[var(--ink-soft)]">Grant access in Android settings — read-only, on-device, never uploaded.</p>
+            </div>
+          </div>
+          <NeoButton variant="accent" onClick={() => openScreenTimeSettings()} className="font-semibold">
+            Open settings
+          </NeoButton>
+        </GlassCard>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 pb-8 max-w-3xl mx-auto">
       <div className="animate-fade-up">
         <h1 className="font-serif text-3xl sm:text-4xl tracking-tight text-[var(--ink)]">Screen time</h1>
+        <p className="text-sm text-[var(--ink-soft)] mt-1">{prettyDate(today)}</p>
       </div>
 
       {/* Hero: running total for the day being shown, with a plain comparison to your own baseline */}
