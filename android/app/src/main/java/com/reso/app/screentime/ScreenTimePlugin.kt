@@ -125,7 +125,9 @@ class ScreenTimePlugin : Plugin() {
                 val label = try {
                     pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
                 } catch (e: Exception) {
-                    pkg
+                    // Still couldn't resolve it (e.g. no launcher activity) —
+                    // show a readable guess instead of the raw dotted package id.
+                    pkg.substringAfterLast('.').replaceFirstChar { it.uppercase() }
                 }
                 val o = JSObject()
                 o.put("package", pkg)
