@@ -182,15 +182,27 @@ export default function JournalPage() {
       return;
     }
 
-    // Native path (Android app): the WebView lacks the browser Speech API,
-    // so use the native speech recognition plugin.
     const native = speechPlugin();
     if (native) {
       try {
+        // Ask for RECORD_AUDIO explicitly and reliably, before recognition.
+        const perm = (window as unknown as {
+          Capacitor?: { Permissions?: { request?: (o: { permissions: Array<{ name: string }> }) => Promise<Record<string, { state: string }>> } };
+        }).Capacitor?.Permissions;
+        if (perm?.request) {
+          const result = await perm.request({ permissions: [{ name: "microphone" }] });
+          const state = result?.microphone?.state;
+          if (state === "denied" || state === "prompt-with-deny") {
+            setError("Microphone permission denied — allow it for Reso in Settings.");
+            return;
+          }
+        }
+
         const { available } = await native.available();
-        if (!available) { setError("No speech recognition on this device."); return; }
+        if (!available) { setError("Speech service not installed on this device — install the Google app."); return; }
         setListening(true);
         setError(null);
+        let gotResult = false;
         const result = await native.start({
           language: "en-US",
           maxMatches: 1,
@@ -199,16 +211,20 @@ export default function JournalPage() {
           popup: true,
         });
         const text = result?.matches?.[0]?.trim();
-        if (text) setDraft((prev) => (prev ? `${prev} ${text}`.trim() : text));
-      } catch {
-        setError("Voice didn't complete — try again.");
+        if (text) { gotResult = true; setDraft((prev) => (prev ? `${prev} ${text}`.trim() : text)); }
+        if (!gotResult) setError("Heard nothing — speak a little louder, and check the Google app's mic permission.");
+      } catch (e) {
+        const raw = e instanceof Error ? e.message : String(e);
+        if (raw.includes("6") || /no match/i.test(raw)) setError("Heard nothing — try again, a little louder.");
+        else if (raw.includes("8") || /busy|client/i.test(raw)) setError("The speech service is busy — wait a few seconds and try again.");
+        else if (raw.includes("9") || /permission/i.test(raw)) setError("Microphone permission denied — allow it in Settings > Apps > Reso > Permissions.");
+        else setError(`Voice failed (${raw.slice(0, 60)}).`);
       } finally {
         setListening(false);
       }
       return;
     }
 
-    // Web path (browser/PWA): the classic SpeechRecognition API.
     const W = window as unknown as { SpeechRecognition?: new () => SpeechRecognitionLike; webkitSpeechRecognition?: new () => SpeechRecognitionLike };
     const SR = W.SpeechRecognition ?? W.webkitSpeechRecognition;
     if (!SR) { setError("Voice isn't available here."); return; }
