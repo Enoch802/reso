@@ -162,3 +162,44 @@ export async function getScreenTimeHistory(daysBack = 7): Promise<ScreenTimeDayR
       apps: (r as { screen_time_apps?: AppUsageInfo[] | null }).screen_time_apps ?? null,
     }));
 }
+
+/**
+ * Live read of TODAY's usage so far — not cached, not stored, called fresh
+ * whenever the screen time page is open. (The daily pull above is a
+ * separate, once-a-day thing that records *yesterday's* completed total.)
+ */
+export async function getTodayScreenTimeLive(): Promise<{
+  minutes: number | null;
+  top_app: string | null;
+  apps: AppUsageInfo[];
+} | null> {
+  const p = plugin();
+  if (!p) return null;
+  try {
+    const { minutes, top_app, apps } = await p.getScreenTimeMinutes({
+      date: todayStr(),
+      limit: APPS_STORED_PER_DAY,
+    });
+    return { minutes, top_app: top_app ?? null, apps: apps ?? [] };
+  } catch {
+    return null;
+  }
+}
+
+/** Coarse category for a package, by keyword match on its id. Best-effort — falls back to "Other". */
+export type AppCategory = "Social" | "Entertainment" | "Productivity" | "Games" | "Other";
+
+const CATEGORY_KEYWORDS: Array<[AppCategory, string[]]> = [
+  ["Social", ["instagram", "facebook", "twitter", "x.android", "snapchat", "tiktok", "whatsapp", "telegram", "reddit", "discord", "linkedin", "pinterest", "messenger"]],
+  ["Entertainment", ["youtube", "netflix", "spotify", "music", "video", "player", "prime", "hbo", "disney", "twitch", "hulu"]],
+  ["Productivity", ["docs", "sheet", "office", "slack", "notion", "drive", "chrome", "browser", "outlook", "gmail", "mail", "calendar", "zoom", "meet", "teams"]],
+  ["Games", ["game", "konami", "pesam", "pubg", "cod", "clash", "roblox", "minecraft", "fifa", "efootball"]],
+];
+
+export function categorize(pkg: string): AppCategory {
+  const p = pkg.toLowerCase();
+  for (const [cat, keywords] of CATEGORY_KEYWORDS) {
+    if (keywords.some((k) => p.includes(k))) return cat;
+  }
+  return "Other";
+}
