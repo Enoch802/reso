@@ -1,11 +1,13 @@
 package com.reso.app.screentime
 
 import android.app.AppOpsManager
+import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.os.Build
 import android.os.Process
 import android.provider.Settings
 import android.util.Base64
@@ -97,29 +99,59 @@ class ScreenTimePlugin : Plugin() {
             val dayStart = fmt.parse(dateStr)!!.time
             val dayEnd = dayStart + 86_400_000L
 
+            // NOTE: queryUsageStats(INTERVAL_DAILY, ...) is intentionally NOT used here.
+            // Its totalTimeInForeground numbers can drift far beyond a real day's worth
+            // of minutes on some devices/OS versions when the query window doesn't line
+            // up exactly with the system's internal bucket boundaries — that's what was
+            // producing impossible totals like 800+ hours for a single day. Computing
+            // usage ourselves from the raw event stream, clipped strictly to
+            // [dayStart, dayEnd), is the reliable approach and can't drift that way.
             val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
-            val stats = usm.queryUsageStats(
-                UsageStatsManager.INTERVAL_DAILY,
-                dayStart - 60_000L,
-                dayEnd + 60_000L
-            )
+            val events = usm.queryEvents(dayStart, dayEnd)
+            val event = UsageEvents.Event()
 
-            // Real foreground time, de-duplicated by package across overlapping buckets.
-            val seen = mutableMapOf<String, Long>()
-            for (s in stats) {
-                if (s.lastTimeStamp <= dayStart || s.firstTimeStamp >= dayEnd) continue
-                val pkg = s.packageName
-                val fg = s.totalTimeInForeground
-                if (fg <= 0L) continue
-                if (fg > (seen[pkg] ?: 0L)) seen[pkg] = fg
+            val openedAt = mutableMapOf<String, Long>() // package -> timestamp it came to foreground
+            val totalMsByPkg = mutableMapOf<String, Long>()
+
+            fun isForegroundEvent(type: Int) =
+                type == UsageEvents.Event.MOVE_TO_FOREGROUND ||
+                (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && type == UsageEvents.Event.ACTIVITY_RESUMED)
+
+            fun isBackgroundEvent(type: Int) =
+                type == UsageEvents.Event.MOVE_TO_BACKGROUND ||
+                (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && type == UsageEvents.Event.ACTIVITY_PAUSED)
+
+            while (events.hasNextEvent()) {
+                events.getNextEvent(event)
+                val pkg = event.packageName ?: continue
+                val ts = event.timeStamp.coerceIn(dayStart, dayEnd)
+                when {
+                    isForegroundEvent(event.eventType) -> {
+                        openedAt[pkg] = ts
+                    }
+                    isBackgroundEvent(event.eventType) -> {
+                        val start = openedAt.remove(pkg)
+                        if (start != null && ts > start) {
+                            totalMsByPkg[pkg] = (totalMsByPkg[pkg] ?: 0L) + (ts - start)
+                        }
+                    }
+                }
             }
-            val totalMs = seen.values.sum()
-            val topApp = seen.maxByOrNull { it.value }?.key
+            // Anything still open at day's end was foreground when the window closed —
+            // count up to dayEnd, not beyond it.
+            for ((pkg, start) in openedAt) {
+                if (dayEnd > start) {
+                    totalMsByPkg[pkg] = (totalMsByPkg[pkg] ?: 0L) + (dayEnd - start)
+                }
+            }
+
+            val totalMs = totalMsByPkg.values.sum().coerceAtMost(86_400_000L)
+            val topApp = totalMsByPkg.maxByOrNull { it.value }?.key
 
             val limit = call.getInt("limit") ?: 0
             val pm = context.packageManager
             val apps = JSArray()
-            val sorted = seen.entries.sortedByDescending { it.value }
+            val sorted = totalMsByPkg.entries.sortedByDescending { it.value }
             val shown = if (limit > 0) sorted.take(limit) else sorted
             shown.forEach { (pkg, ms) ->
                 val label = try {
