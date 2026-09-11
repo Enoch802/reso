@@ -53,8 +53,6 @@ export default function ScreenTimePage() {
       .sortBy("date")
   );
 
-  // The most recent completed day that actually has screen time recorded
-  // (used as a fallback and for the trend chart / average baseline).
   const latest = useMemo(
     () => screenTime?.find((r) => typeof r.screen_time_minutes === "number") ?? null,
     [screenTime]
@@ -68,10 +66,7 @@ export default function ScreenTimePage() {
 
   const enabled = useLiveQuery(() => db.screentime_tracking.get(0), []);
 
-  // Live pull of today's running total — separate from the once-a-day
-  // historical pull, so the hero number reflects "so far today".
-  // Refreshes every 60s while the page is open, and instantly whenever the
-  // app returns to the foreground — always up to date.
+  // Live pull of today's running total — 60s refresh + on foreground return.
   useEffect(() => {
     let alive = true;
     const fetchLive = async () => {
@@ -92,8 +87,6 @@ export default function ScreenTimePage() {
     };
   }, [enabled?.enabled, today]);
 
-  // Completed days for the trend — legacy corrupt rows (> 1440 min, from the
-  // old bucket-span bug) are excluded everywhere below.
   const completedDays = useMemo(() => {
     return (screenTime ?? [])
       .filter((r) =>
@@ -110,14 +103,12 @@ export default function ScreenTimePage() {
       const ds = addDays(todayStr(), -day);
       const stored = completedDays.find((d) => d.date === ds);
       let minutes = stored?.minutes ?? null;
-      // Today's bar shows the LIVE running total — always up to date.
       if (ds === todayStr() && live?.minutes != null) minutes = live.minutes;
       result.push({ date: ds, minutes, isToday: ds === todayStr() });
     }
     return result;
   }, [completedDays, live, today]);
 
-  // Rolling average over completed days only (today is partial, excluded on purpose).
   const avgMinutes = useMemo(() => {
     const valid = completedDays.filter((d) => d.date !== todayStr());
     if (valid.length === 0) return null;
@@ -131,8 +122,6 @@ export default function ScreenTimePage() {
     return Math.max(...valid.map((d) => d.minutes!));
   }, [chartData]);
 
-  // What the hero shows: today's live total if we have it, else the latest
-  // completed day as an honest fallback (e.g. web preview / permission off).
   const heroMinutes = live?.minutes ?? latest?.screen_time_minutes ?? null;
   const heroLabel = live !== null && live !== undefined ? "Today" : (latestLabel || "Latest");
   const heroApps = (live?.apps?.length ? live.apps : latest?.screen_time_apps) ?? [];
@@ -147,7 +136,6 @@ export default function ScreenTimePage() {
       : `${fmtDur(Math.abs(diff))} below your 14-day average${pct >= 5 ? ` (${pct}% less)` : ""}`;
   }, [heroMinutes, avgMinutes]);
 
-  // Category breakdown for whichever day the hero is showing.
   const categoryBreakdown = useMemo(() => {
     const totals = new Map<AppCategory, number>();
     for (const a of heroApps) {
@@ -162,7 +150,6 @@ export default function ScreenTimePage() {
   }, [heroApps]);
   const categoryTotal = categoryBreakdown.reduce((a, c) => a + c.minutes, 0);
 
-  // Permission state — re-checked on return from the settings screen.
   useEffect(() => {
     let alive = true;
     const check = async () => {
@@ -176,7 +163,6 @@ export default function ScreenTimePage() {
     return () => { alive = false; document.removeEventListener("visibilitychange", onVis); };
   }, []);
 
-  // Fire the daily historical pull from here too — idempotent (once-per-day gate inside).
   useEffect(() => {
     if (perm === "granted" && enabled?.enabled === 1) void pullYesterdayScreenTime();
   }, [perm, enabled?.enabled]);
@@ -186,12 +172,11 @@ export default function ScreenTimePage() {
 
     const maxValue = maxMinutes ?? 0;
     const daysToRender = chartData.filter((d) => d.minutes !== null);
-    // Baseline reference line position, as a % up from the bottom of the chart.
     const baselinePct = avgMinutes != null && maxValue > 0 ? Math.min(100, (avgMinutes / maxValue) * 100) : null;
 
     return (
       <GlassCard className="p-5 animate-fade-up">
-        <SectionHeader title="14-day trend" sub={`${daysToRender.length} days tracked — dashed line is your average`} />
+        <SectionHeader title="14-day trend" sub={`${daysToRender.length} days tracked`} />
         <div className="mt-6 relative h-40">
           {baselinePct != null && (
             <div
@@ -227,7 +212,7 @@ export default function ScreenTimePage() {
           </div>
         </div>
         <div className="mt-4 flex justify-between items-center text-xs text-[var(--ink-faint)]">
-          <span>{avgMinutes !== null ? `avg ${fmtDur(avgMinutes)}` : "no average yet"}</span>
+          <span>{avgMinutes !== null ? `avg ${fmtDur(avgMinutes)}` : ""}</span>
           <span>{maxMinutes !== null ? `peak ${fmtDur(maxMinutes)}` : ""}</span>
         </div>
       </GlassCard>
@@ -239,23 +224,19 @@ export default function ScreenTimePage() {
       <div className="space-y-6 pb-8 max-w-3xl mx-auto">
         <div className="animate-fade-up">
           <h1 className="font-serif text-3xl sm:text-4xl tracking-tight text-[var(--ink)]">Screen time</h1>
-          <p className="text-sm text-[var(--ink-soft)] mt-1">Android-only feature</p>
         </div>
 
         <GlassCard className="p-6 text-center">
           <AlertCircle className="mx-auto mb-4 text-amber-500" size={48} />
-          <h2 className="font-serif text-xl text-[var(--ink)] mb-2">Screen time comes from Android</h2>
-          <p className="text-sm text-[var(--ink-soft)] mb-6">This feature only works inside the Reso Android app — not in a browser or PWA.</p>
+          <h2 className="font-serif text-xl text-[var(--ink)] mb-2">Android-only feature</h2>
           <NeoButton onClick={() => setShowPermission(true)} className="font-semibold">
-            <span className="inline-flex items-center gap-2"><Settings size={16} aria-hidden /> Setup in settings</span>
+            Setup in settings
           </NeoButton>
         </GlassCard>
 
         <Modal open={showPermission} onClose={() => setShowPermission(false)} title="Setup screen time">
           <div className="text-sm text-[var(--ink-soft)] space-y-3">
-            <p>Screen time comes from Android&apos;s UsageStatsManager.</p>
-            <p>Everything else keeps working exactly as it does now. If you install the Android build later, this is where the one-time setup happens.</p>
-            <p className="text-xs text-[var(--ink-faint)]">This data never leaves your device — it lands in the same local store as everything else.</p>
+            <p>This data never leaves your device.</p>
           </div>
         </Modal>
       </div>
@@ -267,26 +248,21 @@ export default function ScreenTimePage() {
       <div className="space-y-6 pb-8 max-w-3xl mx-auto">
         <div className="animate-fade-up">
           <h1 className="font-serif text-3xl sm:text-4xl tracking-tight text-[var(--ink)]">Screen time</h1>
-          <p className="text-sm text-[var(--ink-soft)] mt-1">Turn it on in Settings to track your daily usage</p>
         </div>
 
         <GlassCard className="p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-medium text-[var(--ink)]">Screen time tracking is off</h2>
+          <div className="flex items-center justify-between gap-4">
+            <h2 className="font-medium text-[var(--ink)]">Tracking is off</h2>
             <NeoButton onClick={() => router.push("/settings")} className="font-semibold">
-              <span className="inline-flex items-center gap-2"><Settings size={16} aria-hidden /> Go to settings</span>
+              <span className="inline-flex items-center gap-2"><Settings size={16} aria-hidden /> Settings</span>
             </NeoButton>
           </div>
-          <p className="text-sm text-[var(--ink-soft)]">
-            When enabled, Reso will quietly read your daily screen time from Android each day and show a 14-day trend here.
-          </p>
         </GlassCard>
 
         {chartData.filter((d) => d.minutes !== null).length === 0 && (
           <EmptyState
             icon={<Hourglass size={48} className="text-[var(--ink-faint)]" />}
             title="No screen time data yet"
-            sub="Turn on tracking in Settings and the next time you open Reso, we'll pull your usage."
             action={
               <NeoButton onClick={() => router.push("/settings")} className="font-semibold">
                 <span className="inline-flex items-center gap-2"><Settings size={16} aria-hidden /> Enable tracking</span>
@@ -313,7 +289,6 @@ export default function ScreenTimePage() {
             </span>
             <div>
               <h2 className="font-medium text-[var(--ink)]">Usage access needed</h2>
-              <p className="text-sm text-[var(--ink-soft)]">Grant access in Android settings — read-only, on-device, never uploaded.</p>
             </div>
           </div>
           <NeoButton variant="accent" onClick={() => openScreenTimeSettings()} className="font-semibold">
@@ -331,7 +306,6 @@ export default function ScreenTimePage() {
         <p className="text-sm text-[var(--ink-soft)] mt-1">{prettyDate(today)}</p>
       </div>
 
-      {/* Hero: running total for the day being shown, with a plain comparison to your own baseline */}
       <GlassCard strong className="p-6 sm:p-8 animate-fade-up">
         <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ink-faint)] flex items-center gap-1.5">
           <Hourglass size={12} aria-hidden /> {heroLabel}
@@ -340,13 +314,12 @@ export default function ScreenTimePage() {
           {heroMinutes !== null ? fmtDur(heroMinutes) : "—"}
         </p>
         <p className="text-sm text-[var(--ink-soft)] mt-1.5">
-          {comparisonLine ?? (heroMinutes !== null ? "building your baseline — check back after a few days" : "no data yet")}
+          {comparisonLine}
         </p>
       </GlassCard>
 
       {renderChart()}
 
-      {/* Where the time went, grouped by category */}
       {categoryBreakdown.length > 0 && (
         <GlassCard className="p-5 animate-fade-up">
           <SectionHeader title="Where it went" sub={`${heroLabel.toLowerCase()}, grouped`} />
@@ -373,13 +346,9 @@ export default function ScreenTimePage() {
         </GlassCard>
       )}
 
-      {/* Per-app breakdown — logos + time each, heaviest first */}
       {heroApps.length > 0 && (
         <GlassCard className="p-5 animate-fade-up">
-          <SectionHeader
-            title={`Apps — ${heroLabel.toLowerCase()}`}
-            sub="Heaviest first"
-          />
+          <SectionHeader title={`Apps — ${heroLabel.toLowerCase()}`} />
           <div className="mt-4 space-y-3">
             {heroApps.map((a) => {
               const maxApp = Math.max(...heroApps.map((x) => x.minutes), 1);
@@ -416,23 +385,8 @@ export default function ScreenTimePage() {
         <EmptyState
           icon={<Hourglass size={48} className="text-[var(--ink-faint)]" />}
           title="No screen time data yet"
-          sub="Tracking is on — this fills in as you use your phone today, and the trend builds over the next few days."
         />
       )}
-
-      <GlassCard className="p-5 animate-fade-up border border-[var(--accent)]/30">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h3 className="font-medium text-[var(--ink)]">How it works</h3>
-            <p className="text-sm text-[var(--ink-soft)] mt-1">
-              Reso reads your screen time from Android's UsageStatsManager. It's read-only, stays on your device, and never leaves.
-            </p>
-          </div>
-          <NeoButton onClick={() => router.push("/settings")} variant="accent" className="font-semibold shrink-0">
-            <span className="inline-flex items-center gap-2"><Settings size={16} aria-hidden /> Customize</span>
-          </NeoButton>
-        </div>
-      </GlassCard>
     </div>
   );
 }
