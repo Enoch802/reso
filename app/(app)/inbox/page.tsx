@@ -33,7 +33,7 @@ export default function InboxPage() {
   const refresh = async () => {
     setRefreshing(true); setNotice(null);
     try {
-      if (!accounts?.length) { setNotice("Connect a Gmail account first — Settings, then Email."); return; }
+      if (!accounts?.length) { setNotice("Connect Gmail in Settings first."); return; }
       let added = 0;
       for (const acc of accounts) {
         try {
@@ -49,10 +49,10 @@ export default function InboxPage() {
           await db.email_accounts.update(acc.id!, { last_fetched_at: Date.now() });
         } catch (e) {
           const msg = e instanceof Error ? e.message : "";
-          if (msg === "reconnect-needed") setNotice(`${acc.email} needs reconnecting because Google access was revoked or the connection failed.`);
+          if (msg === "reconnect-needed") setNotice(`${acc.email} needs reconnecting.`);
         }
       }
-      if (added === 0 && !notice) setNotice("Nothing new since the last look.");
+      if (added === 0 && !notice) setNotice("Nothing new.");
     } finally {
       setRefreshing(false);
     }
@@ -63,9 +63,6 @@ export default function InboxPage() {
       <div className="flex items-end justify-between gap-4 animate-fade-up">
         <div>
           <h1 className="font-serif text-3xl sm:text-4xl tracking-tight text-[var(--ink)]">Inbox</h1>
-          <p className="text-sm text-[var(--ink-soft)] mt-1">
-            Today's mail, boiled down. What needs you, what can wait.
-          </p>
         </div>
         <NeoButton variant="accent" onClick={refresh} disabled={refreshing} className="font-semibold shrink-0">
           <span className="inline-flex items-center gap-2">
@@ -77,13 +74,11 @@ export default function InboxPage() {
 
       {notice && <p className="text-sm text-[var(--ink-soft)] neo-pressed rounded-xl px-4 py-3 animate-fade-in">{notice}</p>}
 
-      {/* Not connected: low-pressure, never an error */}
       {accounts && accounts.length === 0 && (
         <GlassCard>
           <EmptyState
             icon={<Mail size={26} aria-hidden />}
             title="No account connected"
-            sub="Connect a Gmail account in Settings and Reso will quietly rank each day's mail — important first, one line each. Read-only, kept on your device, and entirely optional."
             action={<Link href="/settings" className="focus-ring inline-flex items-center gap-2 text-sm text-[var(--accent)] font-medium hover:gap-3 transition-all">Go to Settings <ArrowRight size={15} aria-hidden /></Link>}
           />
         </GlassCard>
@@ -94,12 +89,10 @@ export default function InboxPage() {
           <EmptyState
             icon={<InboxIcon size={26} aria-hidden />}
             title="Nothing new today"
-            sub="When mail arrives, it lands here ranked — important things first, one honest line about each."
           />
         </GlassCard>
       )}
 
-      {/* Important first, with summaries */}
       {grouped.important.length > 0 && (
         <div className="animate-fade-up">
           <SectionHeader title="Needs your attention" />
@@ -120,7 +113,6 @@ export default function InboxPage() {
         </div>
       )}
 
-      {/* Medium / low collapsed by default */}
       {grouped.medium.length > 0 && (
         <div className="animate-fade-up">
           <button onClick={() => setOpenMed((v) => !v)} aria-expanded={openMed} className="focus-ring w-full flex items-center gap-2 text-sm text-[var(--ink-soft)] hover:text-[var(--ink)] transition-colors mb-2">
@@ -159,10 +151,6 @@ export default function InboxPage() {
           )}
         </div>
       )}
-
-      <p className="text-xs text-[var(--ink-faint)]">
-        Mail is fetched only when you ask, ranked by AI, and saved on this device. Nothing about your inbox leaves your phone except the ranking request itself.
-      </p>
     </div>
   );
 }
