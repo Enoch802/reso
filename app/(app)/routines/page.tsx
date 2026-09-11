@@ -1,4 +1,4 @@
-="use client";
+"use client";
 import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Repeat2, Plus, Flame, Check, X, Pencil } from "lucide-react";
