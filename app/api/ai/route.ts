@@ -3,10 +3,35 @@ import { NextRequest, NextResponse } from "next/server";
 /**
  * Stateless AI route: client sends data in, route calls OpenRouter, returns result.
  * Nothing is stored here. All persistence happens on-device in the client.
+ *
+ * CORS is handled here directly (not only via middleware) because the bundled
+ * Android app (origin https://localhost) calls this route cross-origin. The
+ * OPTIONS handler answers the browser's preflight; every JSON response is
+ * stamped with allow-headers.
  */
 
 const OR_URL = "https://openrouter.ai/api/v1/chat/completions";
 const OR_MODEL = "openrouter/free";
+
+const CORS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Max-Age": "86400",
+};
+
+/** JSON response with CORS headers stamped. */
+function json(data: unknown, status = 200) {
+  return new NextResponse(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json", ...CORS },
+  });
+}
+
+/** Preflight handshake — required for cross-origin POSTs with JSON bodies. */
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS });
+}
 
 async function callOpenRouter(messages: Array<{ role: string; content: string }>, jsonMode = false) {
   const key = process.env.OPENROUTER_API_KEY;
@@ -61,7 +86,7 @@ Rules: mentioned_pending = tests/assessments the student says they wrote or have
         true
       );
       const j = extractJson(out);
-      return NextResponse.json(j);
+      return json(j);
     }
 
     if (mode === "digest") {
@@ -80,7 +105,7 @@ ALWAYS end with a single gentle reflection question on its own line, prefixed wi
         { role: "system", content: system },
         { role: "user", content: JSON.stringify(input) },
       ]);
-      return NextResponse.json({ digest: out.trim() });
+      return json({ digest: out.trim() });
     }
 
     if (mode === "coach") {
@@ -94,13 +119,13 @@ Answer ONLY from the course context provided (topics and their states, exam date
 
 My question: ${question}` },
       ]);
-      return NextResponse.json({ reply: out.trim() });
+      return json({ reply: out.trim() });
     }
 
-    return NextResponse.json({ error: "unknown-mode" }, { status: 400 });
+    return json({ error: "unknown-mode" }, 400);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "failed";
     const friendly = msg === "missing-key" ? "ai-not-configured" : "ai-unavailable";
-    return NextResponse.json({ error: friendly }, { status: 503 });
+    return json({ error: friendly }, 503);
   }
 }
