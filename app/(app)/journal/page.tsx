@@ -3,7 +3,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Mic, Send, History, X } from "lucide-react";
 import { db } from "@/lib/db";
-import type { DailyLog } from "@/lib/db";
 import { GlassCard, EmptyState, Modal, NeoButton, Tag } from "@/components/ui";
 import { useToday } from "@/components/AppShell";
 import { aiChat } from "@/lib/ai";
@@ -67,7 +66,6 @@ export default function JournalPage() {
     try {
       const parsed = await aiChat(content, context);
 
-      // Apply structured understanding locally.
       await db.chat_messages.add({ date: today, sender: "reso", text: parsed.reply, timestamp: Date.now() });
 
       const logRow = (await db.daily_logs.where("date").equals(today).toArray())[0];
@@ -89,10 +87,9 @@ export default function JournalPage() {
           parsed_summary: parsed.reply,
         });
 
-      // Pending-assessment memory: mention a test with no score -> pending entry.
       for (const m of parsed.mentioned_pending ?? []) {
         const course = matchCourse(m.course_hint);
-        if (!course?.id) continue; // Reso's reply asks for clarification when ambiguous
+        if (!course?.id) continue;
         const dupe = (pendingScores ?? []).some((p) => p.course_id === course.id && p.label.toLowerCase() === m.label.toLowerCase());
         if (dupe) continue;
         const comp = (await db.course_ca_components.where("course_id").equals(course.id).toArray())
@@ -110,7 +107,6 @@ export default function JournalPage() {
         });
       }
 
-      // A score mentioned later resolves the right pending entry.
       for (const s of parsed.mentioned_score ?? []) {
         const course = matchCourse(s.course_hint);
         if (!course?.id) continue;
@@ -141,10 +137,9 @@ export default function JournalPage() {
         }
       }
     } catch {
-      setError("Reso couldn't reach the listener just now. Your words are saved — try sending again in a moment.");
       await db.chat_messages.add({
         date: today, sender: "reso",
-        text: "I couldn't reach the listener just now, but your words are saved on this device. Try again in a moment.",
+        text: "Couldn't reach the listener just now — your words are saved. Try again in a moment.",
         timestamp: Date.now(),
       });
     } finally {
@@ -164,7 +159,7 @@ export default function JournalPage() {
     if (listening) { recRef.current?.stop(); return; }
     const W = window as unknown as { SpeechRecognition?: new () => SpeechRecognitionLike; webkitSpeechRecognition?: new () => SpeechRecognitionLike };
     const SR = W.SpeechRecognition ?? W.webkitSpeechRecognition;
-    if (!SR) { setError("Voice isn't available in this browser — typing works just as well."); return; }
+    if (!SR) { setError("Voice isn't available here."); return; }
     const rec = new SR();
     rec.lang = "en-US";
     rec.continuous = false;
@@ -194,7 +189,6 @@ export default function JournalPage() {
       <div className="flex items-start justify-between gap-3 flex-wrap mb-4 animate-fade-up">
         <div>
           <h1 className="font-serif text-2xl sm:text-3xl tracking-tight text-[var(--ink)]">Journal</h1>
-          <p className="text-sm text-[var(--ink-soft)] mt-0.5">Evening reflection, or anything at all. Type or speak.</p>
         </div>
         <NeoButton onClick={() => setShowHistory(true)} ariaLabel="Earlier days">
           <span className="inline-flex items-center gap-2"><History size={16} aria-hidden /> Earlier days</span>
@@ -207,7 +201,6 @@ export default function JournalPage() {
             <EmptyState
               icon={<Mic size={24} aria-hidden />}
               title="How did today go?"
-              sub="Mention a test you wrote, hours you studied, how you're feeling. Reso remembers the open threads and closes them when the scores come."
             />
           )}
           {messages?.map((m) => (
@@ -266,19 +259,18 @@ export default function JournalPage() {
 
       {dailyLog && dailyLog[0]?.mood_state === "sick" && (
         <div className="mt-3 flex justify-center">
-          <Tag>rest day — nothing today counts against you</Tag>
+          <Tag>rest day</Tag>
         </div>
       )}
       {typeof yesterdayLog?.[0]?.screen_time_minutes === "number" && (
         <p className="mt-3 text-center text-xs text-[var(--ink-faint)]">
-          Yesterday's screen time: {fmtMins(yesterdayLog[0].screen_time_minutes!)}
-          {yesterdayLog[0].screen_time_top_app ? `, most of it in ${yesterdayLog[0].screen_time_top_app}` : ""}
-          {" "}— just context, never a verdict.
+          Yesterday: {fmtMins(yesterdayLog[0].screen_time_minutes!)}
+          {yesterdayLog[0].screen_time_top_app ? ` — ${yesterdayLog[0].screen_time_top_app}` : ""}
         </p>
       )}
 
       <Modal open={showHistory} onClose={() => setShowHistory(false)} title="Earlier days" wide>
-        {grouped.length === 0 && <p className="text-sm text-[var(--ink-soft)]">Nothing from before yet — this is where your past reflections will gather.</p>}
+        {grouped.length === 0 && <p className="text-sm text-[var(--ink-soft)]">Nothing yet.</p>}
         <div className="space-y-5">
           {grouped.map(([date, msgs]) => (
             <div key={date}>
