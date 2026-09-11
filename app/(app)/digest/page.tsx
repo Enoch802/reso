@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import { ScrollText, Sparkles, Loader2, Award } from "lucide-react";
@@ -11,6 +11,14 @@ import { aiDigest } from "@/lib/ai";
 import { weekStartOnOrBefore, prettyDate, todayStr, daysBetween } from "@/lib/dates";
 
 export default function DigestPage() {
+  return (
+    <Suspense fallback={<div className="py-20 text-center text-[var(--ink-faint)]">Loading…</div>}>
+      <DigestInner />
+    </Suspense>
+  );
+}
+
+function DigestInner() {
   const params = useSearchParams();
   const [recapOpen, setRecapOpen] = useState(params?.get("recap") === "1");
   const [busy, setBusy] = useState(false);
