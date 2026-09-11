@@ -38,21 +38,21 @@ export default function SettingsPage() {
   const p = profile?.[0];
 
   const cards = [
-    { id: "profile", icon: <UserRound size={17} />, label: "Profile", detail: p ? `${p.name} — ${p.university}` : "" },
-    { id: "semester", icon: <CalendarRange size={17} />, label: "Semester", detail: p ? `${p.semester_start_date} to ${p.semester_end_date} · GPA target ${p.gpa_target}` : "" },
-    { id: "courses", icon: <BookOpenCheck size={17} />, label: "Courses", detail: `${courses?.length ?? 0} courses` },
-    { id: "timetable", icon: <CalendarClock size={17} />, label: "Class timetable", detail: `${slots?.length ?? 0} slots` },
-    { id: "examdates", icon: <CalendarDays size={17} />, label: "Exam dates", detail: `${exams?.length ?? 0} set` },
-    { id: "examtt", icon: <CalendarCheck2 size={17} />, label: "Exam timetable upload", detail: "official document, when it arrives" },
-    { id: "studytt", icon: <NotebookPen size={17} />, label: "Personal study timetable", detail: `${studySlots?.length ?? 0} blocks` },
-    { id: "finance", icon: <Wallet2 size={17} />, label: "Finance", detail: fs?.[0] ? `${fmtMoney(fs[0].current_allowance_amount)} weekly` : "" },
-    { id: "routines", icon: <Repeat2 size={17} />, label: "Routines", detail: `${routines?.length ?? 0} active` },
-    { id: "email", icon: <Mail size={17} />, label: "Email", detail: emailAccounts?.length ? `${emailAccounts.length} connected` : "not connected" },
-    { id: "screentime", icon: <Hourglass size={17} />, label: "Screen time tracking", detail: "Android, optional" },
-    { id: "reminders", icon: <Bell size={17} />, label: "Reminders", detail: "on or off, and when" },
-    { id: "alarms", icon: <AlarmClock size={17} />, label: "Alarms", detail: "named alarms that ring" },
-    { id: "appearance", icon: <Palette size={17} />, label: "Appearance", detail: p?.theme_preference ?? "system" },
-    { id: "data", icon: <Database size={17} />, label: "Data & recap", detail: "export, archive, recap" },
+    { id: "profile", icon: <UserRound size={17} />, label: "Profile" },
+    { id: "semester", icon: <CalendarRange size={17} />, label: "Semester" },
+    { id: "courses", icon: <BookOpenCheck size={17} />, label: "Courses" },
+    { id: "timetable", icon: <CalendarClock size={17} />, label: "Class timetable" },
+    { id: "examdates", icon: <CalendarDays size={17} />, label: "Exam dates" },
+    { id: "examtt", icon: <CalendarCheck2 size={17} />, label: "Exam timetable upload" },
+    { id: "studytt", icon: <NotebookPen size={17} />, label: "Personal study timetable" },
+    { id: "finance", icon: <Wallet2 size={17} />, label: "Finance" },
+    { id: "routines", icon: <Repeat2 size={17} />, label: "Routines" },
+    { id: "email", icon: <Mail size={17} />, label: "Email" },
+    { id: "screentime", icon: <Hourglass size={17} />, label: "Screen time tracking" },
+    { id: "reminders", icon: <Bell size={17} />, label: "Reminders" },
+    { id: "alarms", icon: <AlarmClock size={17} />, label: "Alarms" },
+    { id: "appearance", icon: <Palette size={17} />, label: "Appearance" },
+    { id: "data", icon: <Database size={17} />, label: "Data & recap" },
   ];
 
   return (
@@ -72,7 +72,6 @@ export default function SettingsPage() {
             <span className="neo-sm w-10 h-10 rounded-xl flex items-center justify-center text-[var(--accent)] shrink-0" aria-hidden>{c.icon}</span>
             <div className="flex-1 min-w-0">
               <p className="font-medium text-[var(--ink)] text-[15px]">{c.label}</p>
-              <p className="text-xs text-[var(--ink-faint)] truncate">{c.detail}</p>
             </div>
             <ChevronRight size={16} className="text-[var(--ink-faint)] shrink-0" aria-hidden />
           </button>
