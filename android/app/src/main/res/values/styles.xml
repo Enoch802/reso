@@ -13,6 +13,10 @@
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
         <item name="android:background">@null</item>
+        <!-- Paint the window in the app's page color instead of system white,
+             so transient gaps during web navigation don't flash white.
+             Resolves via values-night in dark mode. -->
+        <item name="android:windowBackground">@color/reso_page</item>
     </style>
 
 
