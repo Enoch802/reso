@@ -31,11 +31,11 @@ function colorFor(pkg: string): string {
 }
 
 const CATEGORY_COLOR: Record<AppCategory, string> = {
-  Social: "hsl(340 65% 58%)",
-  Entertainment: "hsl(265 55% 60%)",
-  Productivity: "hsl(200 60% 52%)",
-  Games: "hsl(28 75% 55%)",
-  Other: "hsl(0 0% 65%)",
+  Social: "var(--ink)",
+  Entertainment: "#57575f",
+  Games: "#8a8a94",
+  Productivity: "#b5b5bd",
+  Other: "rgba(120,120,120,0.18)",
 };
 
 export default function ScreenTimePage() {
