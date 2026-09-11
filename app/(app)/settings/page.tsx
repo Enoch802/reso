@@ -59,7 +59,6 @@ export default function SettingsPage() {
     <div className="space-y-6 pb-8 max-w-3xl mx-auto">
       <div className="animate-fade-up">
         <h1 className="font-serif text-3xl sm:text-4xl tracking-tight text-[var(--ink)]">Settings</h1>
-        <p className="text-sm text-[var(--ink-soft)] mt-1">Everything here lives on this device only.</p>
       </div>
 
       <div className="grid sm:grid-cols-2 gap-3">
@@ -82,7 +81,7 @@ export default function SettingsPage() {
 
       {/* Notifications opt-in */}
       <GlassCard className="p-5 animate-fade-up">
-        <SectionHeader icon={<Bell size={18} aria-hidden />} title="Notification access" sub="Reso needs your okay once to show any reminder on this device." />
+        <SectionHeader icon={<Bell size={18} aria-hidden />} title="Notification access" />
         <NotifButton />
       </GlassCard>
 
@@ -186,8 +185,7 @@ function CoursesModal({ open, onClose }: { open: boolean; onClose: () => void })
             <RemoveCourse code={c.code} courseId={c.id!} />
           </div>
         ))}
-        {!courses?.length && <p className="text-sm text-[var(--ink-soft)]">No courses yet — add them during setup or here.</p>}
-        <p className="text-xs text-[var(--ink-faint)]">Course scores, topics and exam dates are managed on each course's page in Academics.</p>
+        {!courses?.length && <p className="text-sm text-[var(--ink-soft)]">No courses yet.</p>}
       </div>
     </Modal>
   );
@@ -198,7 +196,6 @@ function TimetableModal({ open, onClose }: { open: boolean; onClose: () => void 
   const slots = useLiveQuery(() => db.timetable_slots.toArray(), [open]);
   return (
     <Modal open={open} onClose={onClose} title="Class timetable" wide>
-      <p className="text-sm text-[var(--ink-soft)] mb-4">Re-upload the official timetable (read by AI, reviewed by you) or clear slots to start over.</p>
       <TimetableUpload
         kind="class"
         courseCodes={(courses ?? []).map((c) => c.code)}
@@ -243,7 +240,6 @@ function ExamDatesModal({ open, onClose }: { open: boolean; onClose: () => void 
   const exams = useLiveQuery(() => db.exams.toArray(), [open]);
   return (
     <Modal open={open} onClose={onClose} title="Exam dates" wide>
-      <p className="text-sm text-[var(--ink-soft)] mb-5">Set a date the moment it's announced — countdowns and possibility analysis start working immediately, no document needed.</p>
       <div className="space-y-5">
         {(courses ?? []).map((c) => {
           const ex = (exams ?? []).filter((e) => e.course_id === c.id)[0];
@@ -254,7 +250,7 @@ function ExamDatesModal({ open, onClose }: { open: boolean; onClose: () => void 
             </div>
           );
         })}
-        {!courses?.length && <p className="text-sm text-[var(--ink-soft)]">Add courses first — then their exam dates live here.</p>}
+        {!courses?.length && <p className="text-sm text-[var(--ink-soft)]">No courses yet.</p>}
       </div>
     </Modal>
   );
@@ -264,7 +260,6 @@ function ExamTTModal({ open, onClose }: { open: boolean; onClose: () => void }) 
   const courses = useLiveQuery(() => db.courses.toArray(), [open]);
   return (
     <Modal open={open} onClose={onClose} title="Exam timetable upload" wide>
-      <p className="text-sm text-[var(--ink-soft)] mb-4">When the official exam timetable drops, upload it here. Dates, times and venues fill in bulk — matched against your courses, reviewed by you before saving.</p>
       <TimetableUpload
         kind="exam"
         courseCodes={(courses ?? []).map((c) => c.code)}
@@ -290,7 +285,6 @@ function StudyTTModal({ open, onClose }: { open: boolean; onClose: () => void })
   const slots = useLiveQuery(() => db.personal_study_slots.toArray(), [open]);
   return (
     <Modal open={open} onClose={onClose} title="Personal study timetable" wide>
-      <p className="text-sm text-[var(--ink-soft)] mb-4">Your own study schedule — kept strictly separate from class times, never mixed in.</p>
       <TimetableUpload
         kind="study"
         courseCodes={[]}
@@ -380,7 +374,6 @@ function RoutinesModal({ open, onClose }: { open: boolean; onClose: () => void }
             </button>
           </div>
         ))}
-        <p className="text-xs text-[var(--ink-faint)]">Tap a routine's check or skip from the Routines page each day. New routines are added there too.</p>
       </div>
     </Modal>
   );
@@ -491,7 +484,6 @@ function AppearanceModal({ open, onClose }: { open: boolean; onClose: () => void
           </button>
         ))}
       </div>
-      <p className="text-xs text-[var(--ink-faint)] mt-4">Dark mode is a warm charcoal ink — never pure black.</p>
     </Modal>
   );
 }
@@ -508,14 +500,9 @@ function DataModal({ open, onClose }: { open: boolean; onClose: () => void }) {
     <>
       <Modal open={open} onClose={onClose} title="Data & recap" wide>
         <div className="space-y-4">
-          <p className="text-xs text-[var(--ink-faint)] -mt-1 mb-1">
-            Reso has no server-side storage — this export is the only backup mechanism. Keep a copy somewhere safe.
-            {Capacitor.isNativePlatform?.() && <span className="block mt-1">On Android, the file will be saved to the app's Documents folder and can be shared via the share sheet.</span>}
-          </p>
           <div className="flex items-center justify-between gap-3 rounded-2xl neo p-4">
             <div>
               <p className="font-medium text-[var(--ink)] text-sm flex items-center gap-2"><Download size={15} aria-hidden /> Export my data</p>
-              <p className="text-xs text-[var(--ink-faint)] mt-0.5">One JSON file, everything Reso knows — the only backup there is.</p>
             </div>
             <NeoButton
               onClick={async () => {
@@ -540,23 +527,19 @@ function DataModal({ open, onClose }: { open: boolean; onClose: () => void }) {
                       url: fileUri.uri,
                       dialogTitle: "Save or share your Reso data",
                     });
-                    alert("Export complete! Share sheet opened. You can save the file to your device, send it to yourself via email/Google Drive, or share it to another app.");
                   } else {
                     const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
                     const a = document.createElement("a");
                     a.href = url; a.download = "reso-data.json"; a.click();
                     URL.revokeObjectURL(url);
-                    alert("Export complete! reso-data.json has been downloaded to your device.");
                   }
                 } catch (e: unknown) {
                   const msg = e instanceof Error ? e.message : "Unknown error";
                   let userMsg = msg;
                   if (msg.includes("PERMISSION_DENIED") || msg.includes("storage")) {
-                    userMsg = "Storage permission denied. Please grant storage permission in Settings > Apps > Reso > Permissions.";
+                    userMsg = "Storage permission denied. Grant it in Settings > Apps > Reso > Permissions.";
                   } else if (msg.includes("MANAGE_EXTERNAL_STORAGE")) {
-                    userMsg = "Full storage access is needed. Please grant permission in Settings > Apps > Reso > Permissions > All Files Access.";
-                  } else if (msg.includes("not available")) {
-                    userMsg = "Share plugin not available on this platform.";
+                    userMsg = "Grant All Files Access in Settings > Apps > Reso > Permissions.";
                   }
                   alert("Export failed: " + userMsg);
                 }
@@ -566,16 +549,12 @@ function DataModal({ open, onClose }: { open: boolean; onClose: () => void }) {
           <div className="flex items-center justify-between gap-3 rounded-2xl neo p-4">
             <div>
               <p className="font-medium text-[var(--ink)] text-sm flex items-center gap-2"><Award size={15} aria-hidden /> Semester recap</p>
-              <p className="text-xs text-[var(--ink-faint)] mt-0.5">The keepsake summary of where the semester landed.</p>
             </div>
             <NeoButton variant="accent" onClick={() => setRecapOpen(true)}>View recap</NeoButton>
           </div>
           <div className="flex items-center justify-between gap-3 rounded-2xl neo p-4">
             <div>
               <p className="font-medium text-[var(--ink)] text-sm">Sample data</p>
-              <p className="text-xs text-[var(--ink-faint)] mt-0.5">
-                {hasSample ? "Sample history is loaded — clear it any time." : "Load a few realistic weeks of history to see everything working."}
-              </p>
               {seedMsg && <p className="text-xs mt-1 text-[var(--ink-soft)]">{seedMsg}</p>}
             </div>
             {hasSample ? (
@@ -585,7 +564,6 @@ function DataModal({ open, onClose }: { open: boolean; onClose: () => void }) {
                   const current = (await db.profile.toArray())[0];
                   if (current) await db.profile.update(current.id!, { onboarding_complete: 0, new_semester_mode: 0 });
                   setHasSample(false);
-                  setSeedMsg("Sample data cleared — starting your own semester now.");
                 }}
               >Start my own semester</NeoButton>
             ) : (
@@ -594,7 +572,7 @@ function DataModal({ open, onClose }: { open: boolean; onClose: () => void }) {
                 onClick={async () => {
                   const ok = await loadSampleData();
                   setHasSample(ok);
-                  setSeedMsg(ok ? "Sample data loaded — look around, then clear it when ready." : "Live data already exists — clear it first.");
+                  setSeedMsg(ok ? "Sample data loaded." : "Live data already exists — clear it first.");
                 }}
               >Load sample data</NeoButton>
             )}
@@ -603,7 +581,7 @@ function DataModal({ open, onClose }: { open: boolean; onClose: () => void }) {
             <div className="rounded-2xl neo-pressed p-4">
               <p className="text-xs uppercase tracking-wide text-[var(--ink-faint)] mb-2">Archived semesters</p>
               {archived.map((a) => (
-                <p key={a.id} className="text-sm text-[var(--ink-soft)]">{a.label} — kept for comparison</p>
+                <p key={a.id} className="text-sm text-[var(--ink-soft)]">{a.label}</p>
               ))}
             </div>
           ) : null}
@@ -641,9 +619,6 @@ function RemoveCourse({ code, courseId }: { code: string; courseId: number }) {
   );
 }
 
-/**
- * Screen time tracking — Android usage access, one-time setup, fully local.
- */
 function ScreenTimeModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [enabled, setEnabled] = useState<0 | 1>(0);
   const [goal, setGoal] = useState("");
@@ -662,7 +637,7 @@ function ScreenTimeModal({ open, onClose }: { open: boolean; onClose: () => void
       setPermissionState(perm === "granted" ? "granted" : perm === "denied" ? "denied" : "web");
       const row = await db.screentime_tracking.get(0);
       setEnabled(row?.enabled ?? 0);
-      setGoal(String(row?.daily_goal_minutes ?? 300)); // default: 5h
+      setGoal(String(row?.daily_goal_minutes ?? 300));
       setLoading(false);
     })();
   }, [open]);
@@ -695,7 +670,6 @@ function ScreenTimeModal({ open, onClose }: { open: boolean; onClose: () => void
           <div className="flex items-center justify-between p-3 rounded-xl bg-[var(--neo-base)] dark:bg-[var(--neo-base-dark)]">
             <div className="flex-1">
               <p className="font-medium text-[var(--ink)]">Screen time tracking</p>
-              <p className="text-xs text-[var(--ink-faint)] mt-0.5">Read-only, stays on this device</p>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
               <input
@@ -746,7 +720,6 @@ function ScreenTimeModal({ open, onClose }: { open: boolean; onClose: () => void
           {permissionState === "web" && (
             <div className="p-3 rounded-xl bg-[var(--neo-base)] dark:bg-[var(--neo-base-dark)]">
               <p className="font-medium text-[var(--ink)] mb-1">Android-only feature</p>
-              <p className="text-xs text-[var(--ink-faint)]">Works only in the Reso Android app — not in a browser or PWA.</p>
             </div>
           )}
 
@@ -759,7 +732,6 @@ function ScreenTimeModal({ open, onClose }: { open: boolean; onClose: () => void
           {permissionState === "denied" && enabled === 1 && (
             <div className="p-3 rounded-xl bg-[var(--neo-base)] dark:bg-[var(--neo-base-dark)]">
               <p className="text-amber-600 dark:text-amber-300 font-medium mb-1">Permission required</p>
-              {justGranted && <p className="text-xs text-[var(--ink-soft)] mt-2">If you've just allowed it, Reso will pick it up next time you open the app.</p>}
               <NeoButton
                 variant="accent"
                 className="font-semibold mt-3"
@@ -828,14 +800,10 @@ function RemindersModal({ open, onClose }: { open: boolean; onClose: () => void 
 
   return (
     <Modal open={open} onClose={onClose} title="Reminders" wide>
-      <p className="text-sm text-[var(--ink-soft)] mb-5">
-        Turn any of them off, change when they arrive, or add your own.
-      </p>
-
       <div className="space-y-2.5">
         <ToggleRow
           title="Daily spend check-in"
-          sub="Asks how much you spent; updates your balance"
+          sub="Asks how much you spent"
           checked={isEnabled("spend9pm")}
           time={timeOf("spend9pm", "21:00")}
           onToggle={(v) => setPref("spend9pm", v)}
@@ -843,7 +811,7 @@ function RemindersModal({ open, onClose }: { open: boolean; onClose: () => void 
         />
         <ToggleRow
           title="Allowance week closes"
-          sub="The evening before your next allowance"
+          sub="Evening before your next allowance"
           checked={isEnabled("cycle9pm")}
           time={timeOf("cycle9pm", "21:00")}
           onToggle={(v) => setPref("cycle9pm", v)}
@@ -851,7 +819,7 @@ function RemindersModal({ open, onClose }: { open: boolean; onClose: () => void 
         />
         <ToggleRow
           title="Exam countdowns"
-          sub="3 days before, 1 day before, and the morning of every exam"
+          sub="3 days before, 1 day before, and the morning of"
           checked={isEnabled("exam")}
           time={timeOf("exam", "09:00")}
           onToggle={(v) => setPref("exam", v)}
@@ -859,7 +827,7 @@ function RemindersModal({ open, onClose }: { open: boolean; onClose: () => void 
         />
         <ToggleRow
           title="Class reminders"
-          sub={slots.length ? `${slots.length} class${slots.length === 1 ? "" : "es"} — reminded 30 minutes before each` : "Add your timetable in Settings"}
+          sub={slots.length ? `${slots.length} class${slots.length === 1 ? "" : "es"} — 30 minutes before each` : "Add your timetable in Settings"}
           checked={isEnabled("class")}
           onToggle={(v) => setPref("class", v)}
         />
@@ -984,7 +952,7 @@ function NeoSwitch({ checked, label, onChange }: { checked: boolean; label: stri
   );
 }
 
-/* ---------------- Alarms — named, they ring with snooze/stop ---------------- */
+/* ---------------- Alarms ---------------- */
 
 function AlarmsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const alarms = useLiveQuery(() => db.alarms.toArray(), [open]) ?? [];
@@ -1019,10 +987,6 @@ function AlarmsModal({ open, onClose }: { open: boolean; onClose: () => void }) 
 
   return (
     <Modal open={open} onClose={onClose} title="Alarms" wide>
-      <p className="text-sm text-[var(--ink-soft)] mb-4">
-        Alarms ring even when Reso is closed.
-      </p>
-
       <form onSubmit={(e) => { e.preventDefault(); void add(); }} className="flex flex-wrap gap-2 items-end mb-4">
         <Field label="Alarm name" value={label} onChange={setLabel} placeholder="Wake up, prayers..." className="flex-1 min-w-[160px]" />
         <Field label="At" value={time} onChange={setTime} type="time" className="w-[120px]" />
