@@ -1045,7 +1045,7 @@ function AlarmsModal({ open, onClose }: { open: boolean; onClose: () => void }) 
         <div className="space-y-2">
           {alarms.map((a) => (
             <div key={a.id} className="flex items-center justify-between rounded-xl neo-sm px-4 py-3">
-              {editing?.id === a.id ? (
+                  {editing && editing.id === a.id ? (
                 <div className="flex-1 flex flex-wrap gap-2 items-end mr-2">
                   <Field label="Name" value={editing.label} onChange={(v) => setEditing({ ...editing, label: v })} className="flex-1 min-w-[140px]" />
                   <Field label="At" value={editing.time} onChange={(v) => setEditing({ ...editing, time: v })} type="time" className="w-[110px]" />
