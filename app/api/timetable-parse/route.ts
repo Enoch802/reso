@@ -4,10 +4,32 @@ import { NextRequest, NextResponse } from "next/server";
  * Stateless vision route: receives a timetable image/PDF data URL, asks OpenRouter
  * (openrouter/free, vision) to extract rows, returns them for client-side review.
  * Nothing is stored.
+ *
+ * CORS handled here directly — the bundled Android app (origin https://localhost)
+ * calls this route cross-origin; the OPTIONS handler answers the preflight and
+ * every response is stamped with allow-headers.
  */
 
 const OR_URL = "https://openrouter.ai/api/v1/chat/completions";
 const OR_MODEL = "openrouter/free";
+
+const CORS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Max-Age": "86400",
+};
+
+function json(data: unknown, status = 200) {
+  return new NextResponse(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json", ...CORS },
+  });
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS });
+}
 
 const PROMPTS: Record<string, string> = {
   class: `This is a university class timetable. Extract every scheduled class into JSON rows:
@@ -29,7 +51,7 @@ export async function POST(req: NextRequest) {
     const { image, kind, text: rawText } = await req.json();
     const prompt = PROMPTS[kind as string] ?? PROMPTS.class;
     const key = process.env.OPENROUTER_API_KEY;
-    if (!key) return NextResponse.json({ error: "ai-not-configured" }, { status: 503 });
+    if (!key) return json({ error: "ai-not-configured" }, 503);
 
     const content: Array<Record<string, unknown>> = [{ type: "text", text: prompt }];
     if (rawText && String(rawText).trim().length > 0) {
@@ -38,7 +60,7 @@ export async function POST(req: NextRequest) {
     } else if (image) {
       content.push({ type: "image_url", image_url: { url: image } });
     } else {
-      return NextResponse.json({ error: "parse-failed" }, { status: 400 });
+      return json({ error: "parse-failed" }, 400);
     }
 
     const res = await fetch(OR_URL, {
@@ -46,18 +68,18 @@ export async function POST(req: NextRequest) {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
       body: JSON.stringify({ model: OR_MODEL, messages: [{ role: "user", content }] }),
     });
-    if (!res.ok) return NextResponse.json({ error: "parse-failed" }, { status: 502 });
+    if (!res.ok) return json({ error: "parse-failed" }, 502);
     const data = await res.json();
     const text: string = data?.choices?.[0]?.message?.content ?? "";
     const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
     const raw = fenced ? fenced[1] : text;
     const start = raw.indexOf("{");
     const end = raw.lastIndexOf("}");
-    if (start === -1 || end === -1) return NextResponse.json({ error: "parse-failed" }, { status: 502 });
+    if (start === -1 || end === -1) return json({ error: "parse-failed" }, 502);
     const parsed = JSON.parse(raw.slice(start, end + 1));
     const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
-    return NextResponse.json({ rows });
+    return json({ rows });
   } catch {
-    return NextResponse.json({ error: "parse-failed" }, { status: 502 });
+    return json({ error: "parse-failed" }, 502);
   }
 }
