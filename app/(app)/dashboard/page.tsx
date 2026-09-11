@@ -12,16 +12,10 @@ import Checklist from "@/components/Checklist";
 import { useToday } from "@/components/AppShell";
 import {
   academicScore, financeScore, routineScore, isSickDay,
-  daysUntilExam, examCountdownText, screenTimeScore, screenTimeStreak,
+  daysUntilExam, examCountdownText, screenTimeScore,
 } from "@/lib/calc";
 import { screenTimeAvailable } from "@/lib/screentime";
 import { fmtMoney, longDate, prettyDate, addDays, DAY_SHORT } from "@/lib/dates";
-
-function fmtDur(min: number): string {
-  const h = Math.floor(min / 60);
-  const m = Math.round(min % 60);
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
-}
 
 export default function DashboardPage() {
   const today = useToday();
@@ -51,7 +45,6 @@ export default function DashboardPage() {
 
   const sick = isSickDay(dailyLog ?? [], today);
 
-  // Screen-time pillar inputs (matches Overview — keep both in sync)
   const stActive = screenTimeAvailable() && tracking?.enabled === 1;
   const goalMinutes = tracking?.daily_goal_minutes ?? 300;
   const yesterdayLog = useMemo(
@@ -72,7 +65,6 @@ export default function DashboardPage() {
     return { a, f, r, s, overall };
   }, [planItems, expenses, routines, routineLogs, fs, sick, today, stActive, yesterdayMinutes, goalMinutes]);
 
-  // Persist today's discipline snapshot (patterns, not single days).
   useEffect(() => {
     if (!planItems || !planItems.length) return;
     (async () => {
@@ -141,19 +133,6 @@ export default function DashboardPage() {
 
   const planTotal = planItems?.length ?? 0;
 
-  // Detail line for the 4th pillar row.
-  const stStreak = useMemo(
-    () => (stActive ? screenTimeStreak(dailyLogs ?? [], goalMinutes) : 0),
-    [dailyLogs, goalMinutes, stActive]
-  );
-  const scrDetail = (() => {
-    if (sick) return "rest day — not scored";
-    if (!stActive) return "";
-    if (yesterdayMinutes == null) return "yesterday: no data yet — builds as days are logged";
-    const base = `yesterday: ${fmtDur(yesterdayMinutes)} of ${fmtDur(goalMinutes)} goal`;
-    return stStreak > 0 ? `${base} · ${stStreak}d under-goal streak` : base;
-  })();
-
   return (
     <div className="space-y-6">
       {/* Greeting */}
@@ -164,12 +143,10 @@ export default function DashboardPage() {
         </h1>
         <p className="text-[var(--ink-soft)] mt-1.5 text-[15px]">
           {sick
-            ? "You're under the weather today — nothing counts against you. Rest well."
-            : planTotal === 0
-              ? "The day is unwritten. A short plan goes a long way."
-              : planDone === planTotal
-                ? "Everything on today's plan is done. That's the whole game."
-                : `${planDone} of ${planTotal} done so far. Steady.`}
+            ? "You're under the weather today — nothing counts against you."
+            : planTotal > 0
+              ? `${planDone} of ${planTotal} done`
+              : null}
         </p>
       </div>
 
@@ -204,23 +181,11 @@ export default function DashboardPage() {
               : <Ring percent={pillars.overall} label="Discipline" sublabel="today" />}
           </div>
           <div className="flex-1 w-full space-y-3">
-            <PillarRow
-              icon={<BookOpenCheck size={17} aria-hidden />} name="Today's Plan"
-              value={pillars.a} detail={planTotal ? `${planDone}/${planTotal} done` : "no plan yet"}
-            />
-            <PillarRow
-              icon={<Wallet2 size={17} aria-hidden />} name="Finance"
-              value={pillars.f} detail={sick ? "rest day — not scored" : expenses?.length ? `${expenses.length} expense${expenses.length > 1 ? "s" : ""} logged` : "nothing spent yet"}
-            />
-            <PillarRow
-              icon={<Repeat2 size={17} aria-hidden />} name="Routines"
-              value={pillars.r} detail={routinesToday.length ? `${routinesDone.length}/${routinesToday.length} done today` : "nothing scheduled today"}
-            />
+            <PillarRow icon={<BookOpenCheck size={17} aria-hidden />} name="Today's Plan" value={pillars.a} />
+            <PillarRow icon={<Wallet2 size={17} aria-hidden />} name="Finance" value={pillars.f} />
+            <PillarRow icon={<Repeat2 size={17} aria-hidden />} name="Routines" value={pillars.r} />
             {stActive && (
-              <PillarRow
-                icon={<Hourglass size={17} aria-hidden />} name="Screen time"
-                value={pillars.s} detail={scrDetail}
-              />
+              <PillarRow icon={<Hourglass size={17} aria-hidden />} name="Screen time" value={pillars.s} />
             )}
           </div>
         </div>
@@ -232,18 +197,17 @@ export default function DashboardPage() {
         <GlassCard className="p-5">
           <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ink-faint)] flex items-center gap-1.5"><Wallet2 size={12} aria-hidden /> Balance</p>
           <p className="font-serif text-3xl mt-2 text-[var(--ink)]">{balance ? fmtMoney(balance.balance) : "—"}</p>
-          <p className="text-xs text-[var(--ink-soft)] mt-1">{balance ? `week of ${prettyDate(balance.week.week_start_date)}` : "no week open"}</p>
+          <p className="text-xs text-[var(--ink-soft)] mt-1">{balance ? `week of ${prettyDate(balance.week.week_start_date)}` : "—"}</p>
         </GlassCard>
         <GlassCard className="p-5 col-span-2 lg:col-span-1">
           <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ink-faint)] flex items-center gap-1.5"><Repeat2 size={12} aria-hidden /> Today's routines</p>
           <p className="font-serif text-3xl mt-2 text-[var(--ink)]">{routinesDone.length}<span className="text-lg text-[var(--ink-faint)]">/{routinesToday.length}</span></p>
-          <p className="text-xs text-[var(--ink-soft)] mt-1">{routinesToday.length ? "keep the streaks alive" : "a restful day"}</p>
         </GlassCard>
       </div>
 
       {/* Checklist preview */}
       <div className="animate-fade-up [animation-delay:280ms]">
-        <SectionHeader icon={<BookOpenCheck size={20} aria-hidden />} title="Today's Plan" sub="Tick them off as you go — each check counts." />
+        <SectionHeader icon={<BookOpenCheck size={20} aria-hidden />} title="Today's Plan" />
         <GlassCard className="p-5">
           <Checklist compact />
         </GlassCard>
@@ -262,17 +226,17 @@ export default function DashboardPage() {
               <span className="neo-sm w-11 h-11 rounded-xl flex items-center justify-center text-[var(--accent)]" aria-hidden><Mail size={19} /></span>
               <div className="flex-1 min-w-0">
                 {emailItems == null ? (
-                  <p className="text-sm text-[var(--ink-soft)]">Checking today's mail…</p>
+                  <p className="text-sm text-[var(--ink-soft)]">…</p>
                 ) : emailItems.length === 0 ? (
                   <>
                     <p className="font-semibold text-[var(--ink)]">Your inbox, triaged</p>
-                    <p className="text-sm text-[var(--ink-soft)]">Connect a Gmail account and Reso will boil each day's mail down to what matters. Optional, always.</p>
+                    <p className="text-sm text-[var(--ink-soft)]">Optional — connect Gmail in Settings.</p>
                   </>
                 ) : (
                   <>
                     <p className="font-semibold text-[var(--ink)]">{important.length} need${important.length === 1 ? "s" : ""} your attention today</p>
                     <p className="text-sm text-[var(--ink-soft)] truncate">
-                      {important[0] ? `${important[0].summary || important[0].subject}` : "nothing urgent — the rest can wait"}
+                      {important[0] ? `${important[0].summary || important[0].subject}` : "nothing urgent"}
                     </p>
                   </>
                 )}
@@ -291,7 +255,6 @@ export default function DashboardPage() {
               <span className="neo-sm w-11 h-11 rounded-xl flex items-center justify-center text-[var(--accent)]" aria-hidden><MoonStar size={19} /></span>
               <div className="flex-1">
                 <p className="font-semibold text-[var(--ink)]">How was today?</p>
-                <p className="text-sm text-[var(--ink-soft)]">Two lines in the journal is plenty — type or speak, whichever is easier.</p>
               </div>
               <ArrowRight size={18} className="text-[var(--ink-faint)]" aria-hidden />
             </div>
@@ -330,7 +293,7 @@ export default function DashboardPage() {
   );
 }
 
-function PillarRow({ icon, name, value, detail }: { icon: React.ReactNode; name: string; value: number | null; detail: string }) {
+function PillarRow({ icon, name, value }: { icon: React.ReactNode; name: string; value: number | null }) {
   return (
     <div className="flex items-center gap-3">
       <span className="text-[var(--ink-faint)] shrink-0" aria-hidden>{icon}</span>
@@ -345,13 +308,11 @@ function PillarRow({ icon, name, value, detail }: { icon: React.ReactNode; name:
             style={{ width: `${value ?? 0}%`, opacity: value == null ? 0 : 1 }}
           />
         </div>
-        <p className="text-xs text-[var(--ink-faint)] mt-1">{detail}</p>
       </div>
     </div>
   );
 }
 
-/** Evening check-in: log the day's total spend; balance updates automatically. */
 function SpendCheckIn({ today }: { today: string }) {
   const [amount, setAmount] = useState("");
   const [done, setDone] = useState(false);
@@ -369,7 +330,7 @@ function SpendCheckIn({ today }: { today: string }) {
   if (done) {
     return (
       <GlassCard className="p-5 animate-fade-up">
-        <p className="text-sm text-[var(--ink-soft)]">Logged. Your balance and the weekly picture are up to date — rest well.</p>
+        <p className="text-sm text-[var(--ink-soft)]">Logged.</p>
       </GlassCard>
     );
   }
@@ -380,7 +341,6 @@ function SpendCheckIn({ today }: { today: string }) {
         <span className="neo-sm w-11 h-11 rounded-xl flex items-center justify-center shrink-0" aria-hidden><ReceiptText size={19} /></span>
         <div>
           <p className="font-semibold">How much did you spend today?</p>
-          <p className="text-sm text-[var(--ink-soft)]">One number is enough — your balance updates by itself.</p>
         </div>
       </div>
       <form onSubmit={(e) => { e.preventDefault(); log(); }} className="flex gap-2 items-center">
@@ -398,7 +358,6 @@ function SpendCheckIn({ today }: { today: string }) {
   );
 }
 
-/** Topic coverage across all courses — engagement, not grades. */
 function TopicsStatCard() {
   const topics = useLiveQuery(() => db.course_topics.toArray(), []) ?? [];
   const read = topics.filter((t) => t.status === "read" || t.status === "revising").length;
@@ -407,7 +366,6 @@ function TopicsStatCard() {
       <GlassCard className="p-5 h-full hover:-translate-y-0.5 transition-transform">
         <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ink-faint)] flex items-center gap-1.5"><TrendingUp size={12} aria-hidden /> Topic coverage</p>
         <p className="font-serif text-3xl mt-2 text-[var(--ink)]">{read}<span className="text-lg text-[var(--ink-faint)]">/{topics.length}</span></p>
-        <p className="text-xs text-[var(--ink-soft)] mt-1">read or revising</p>
       </GlassCard>
     </Link>
   );
