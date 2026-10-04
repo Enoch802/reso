@@ -6,7 +6,7 @@ const config: CapacitorConfig = {
   // Next.js static export output — the full app, bundled inside the APK.
   webDir: 'out',
   // Native window paints dark instead of white during load/transition gaps.
-  backgroundColor: '#17161d',
+  backgroundColor: '#0a0a0d',
   // DEV ONLY: uncomment to load the live site instead of the bundle.
   // server: { url: 'https://reso-pnjj.vercel.app', cleartext: false },
 };
