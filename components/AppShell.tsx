@@ -11,6 +11,7 @@ import { getScreenTimeEnabled, setScreenTimeEnabled } from "@/lib/db";
 import { BellRing } from "lucide-react";
 import Nav from "./Nav";
 import { primeAudio, startAlarm, stopAlarm, onAlarmChange, RingState, syncNativeAlarms, scheduleNativeIfRunning, nativeSnoozeAlarm, ensureAlarmNotificationPermission } from "@/lib/alarm";
+import { notify as pushNotify } from "@/lib/notify";
 
 /* ---------------- Live "today" — re-renders the whole app at midnight ---------------- */
 const TodayCtx = createContext<string>(todayStr());
@@ -23,11 +24,9 @@ function applyTheme(pref: "light" | "dark" | "system") {
   try { localStorage.setItem("reso-theme", pref); } catch { /* noop */ }
 }
 
-/* ---------------- Notifications (browser now, Capacitor-ready shapes) ---------------- */
+/* ---------------- Notifications — native in the app, web in browsers ---------------- */
 function notify(title: string, body: string) {
-  if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-    try { new Notification(title, { body }); } catch { /* noop */ }
-  }
+  void pushNotify(title, body);
 }
 
 async function scheduleToday(notified: Set<string>) {
@@ -325,9 +324,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // Allowance credit at 7am on collection day; then ask if the amount matched.
   useEffect(() => {
     if (!fs) return;
-    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-      scheduleToday(notifiedRef.current);
-    }
+    void (async () => {
+      // Schedule today's reminders when permission is already granted —
+      // checked through the native-aware helper so it works in the app too.
+      const { notificationPermissionState } = await import("@/lib/notify");
+      if ((await notificationPermissionState()) === "granted") {
+        scheduleToday(notifiedRef.current);
+      }
+    })();
     (async () => {
       const now = new Date();
       const isCollectionDay = now.getDay() === fs.allowance_collection_day;
