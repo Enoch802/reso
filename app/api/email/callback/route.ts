@@ -6,12 +6,19 @@ import { NextRequest, NextResponse } from "next/server";
  * because the opener may be the bundled app (https://localhost) OR the website
  * (this deployment's origin) — authenticity is guaranteed by the random state
  * token, which the client verifies against sessionStorage before accepting.
+ *
+ * The redirect_uri must exactly match the one registered in Google Cloud
+ * Console AND the one used when the consent flow started — so it always
+ * targets the deployment explicitly, never the request's own origin.
  */
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
   const state = req.nextUrl.searchParams.get("state") ?? "";
   const error = req.nextUrl.searchParams.get("error");
-  const redirectUri = process.env.GOOGLE_REDIRECT_URI ?? process.env.NEXT_PUBLIC_GOOGLE_REDIRECT_URI ?? `${req.nextUrl.origin}/api/email/callback`;
+  // Always the deployment's callback — identical to what lib/google.ts sends.
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI
+    ?? process.env.NEXT_PUBLIC_GOOGLE_REDIRECT_URI
+    ?? "https://reso-pnjj.vercel.app/api/email/callback";
   const finish = (payload: Record<string, unknown>) => NextResponse.json(payload, { status: payload.error ? 400 : 200 });
   if (error || !code) return finish({ error: error ?? "missing-code", state });
 
