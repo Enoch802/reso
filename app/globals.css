@@ -236,7 +236,7 @@ body {
     repeating-linear-gradient(45deg, rgba(255,255,255,0.02) 0 6px, transparent 6px 12px);
 }
 
-/* ---------- Skeuomorphism: letter card with a soft folded corner ----------
+/* ---------- Skeuomorphism: letter card with a soft folded corner ---------- */
 .letter-card {
   position: relative;
   background: linear-gradient(160deg, #fbfbf7 0%, #f3f2ec 100%);
@@ -427,11 +427,21 @@ input::placeholder, textarea::placeholder {
     scroll-behavior: auto !important;
   }
 }
+
+/* ---------- Theme-matched canvas (kills the white flash on navigation) ---------- */
 html {
-  background-color: #f2f2f7;
+  background-color: #f1f1f3;
   color-scheme: light;
 }
 html.dark {
-  background-color: #17161d;
+  background-color: #0a0a0d;
   color-scheme: dark;
+}
+
+/* ---------- Perf: cheaper glass on small screens ---------- */
+@media (max-width: 800px) {
+  .glass, .glass-strong {
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+  }
 }
