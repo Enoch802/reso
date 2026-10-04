@@ -20,6 +20,7 @@ import { Share } from "@capacitor/share";
 import { fetchRankedEmails } from "@/lib/ai";
 import { screenTimeAvailable, screenTimePermission, openScreenTimeSettings, pullYesterdayScreenTime } from "@/lib/screentime";
 import ImportData from "@/components/ImportData";
+import { notificationPermissionState, ensureNotificationPermission } from "@/lib/notify";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -107,12 +108,19 @@ export default function SettingsPage() {
 function NotifButton() {
   const [state, setState] = useState<string>("default");
   useEffect(() => {
-    if (typeof Notification !== "undefined") setState(Notification.permission);
+    (async () => {
+      const s = await notificationPermissionState();
+      setState(s);
+    })();
   }, []);
   if (state === "granted") return <Tag tone="good">Reminders are on</Tag>;
+  if (state === "unsupported") return <Tag>Reminders not available here</Tag>;
   return (
-    <NeoButton onClick={async () => setState(await Notification.requestPermission())}>
-      Turn on reminders
+    <NeoButton onClick={async () => {
+      const ok = await ensureNotificationPermission();
+      setState(ok ? "granted" : "denied");
+    }}>
+      {state === "denied" ? "Reminders blocked — allow in app settings" : "Turn on reminders"}
     </NeoButton>
   );
 }
