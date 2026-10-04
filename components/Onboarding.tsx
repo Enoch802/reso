@@ -66,26 +66,34 @@ export default function Onboarding({ newSemesterMode }: { newSemesterMode: boole
   async function finish() {
     setSaving(true);
     const existing = await db.profile.toArray();
+    const payload = {
+      name: name.trim(),                       // the typed name ALWAYS wins —
+      age: parseInt(age) || existing[0]?.age || 0,   // onboarding is the moment
+      university: university.trim() || existing[0]?.university || "", // the user declares it
+      gpa_target: gpaNum, semester_start_date: start, semester_end_date: end,
+      onboarding_complete: 1 as const, new_semester_mode: 0 as const,
+    };
     if (existing[0]) {
-      await db.profile.update(existing[0].id!, {
-        name: existing[0].name || name, age: existing[0].age || parseInt(age) || 0,
-        university: existing[0].university || university,
-        gpa_target: gpaNum, semester_start_date: start, semester_end_date: end,
-        onboarding_complete: 1, new_semester_mode: 0,
+      await db.profile.update(existing[0].id!, payload);
+    } else {
+      await db.profile.add({ ...payload, theme_preference: "system" });
+    }
+    const fsExisting = await db.finance_settings.toArray();
+    if (fsExisting[0]) {
+      await db.finance_settings.update(fsExisting[0].id!, {
+        allowance_collection_day: parseInt(collectionDay) || 0,
+        current_allowance_amount: parseFloat(allowance) || 0,
+        daily_spending_target: parseFloat(dailyTarget) || 0,
+        weekly_savings_target: parseFloat(savingsTarget) || 0,
       });
     } else {
-      await db.profile.add({
-        name, age: parseInt(age) || 0, university,
-        gpa_target: gpaNum, semester_start_date: start, semester_end_date: end,
-        onboarding_complete: 1, theme_preference: "system",
+      await db.finance_settings.add({
+        allowance_collection_day: parseInt(collectionDay),
+        current_allowance_amount: parseFloat(allowance) || 0,
+        daily_spending_target: parseFloat(dailyTarget) || 0,
+        weekly_savings_target: parseFloat(savingsTarget) || 0,
       });
     }
-    await db.finance_settings.add({
-      allowance_collection_day: parseInt(collectionDay),
-      current_allowance_amount: parseFloat(allowance) || 0,
-      daily_spending_target: parseFloat(dailyTarget) || 0,
-      weekly_savings_target: parseFloat(savingsTarget) || 0,
-    });
     if (routineName.trim()) {
       await db.routines.add({
         name: routineName.trim(),
@@ -94,7 +102,7 @@ export default function Onboarding({ newSemesterMode }: { newSemesterMode: boole
         reminder_time: routineTime,
       });
     }
-    router.push("/dashboard");
+    router.push("/overview");
     router.refresh();
   }
 
@@ -148,7 +156,6 @@ export default function Onboarding({ newSemesterMode }: { newSemesterMode: boole
             <Field label="Ends" value={end} onChange={setEnd} type="date" />
           </div>
           <Field label="GPA target (out of 5.0)" value={gpaTarget} onChange={setGpaTarget} type="number" step="0.1" min={0} max={5} className="mt-4" />
-          <p className="text-sm text-[var(--ink-soft)] mt-4">This is the number Reso holds your work against — kindly, never harshly.</p>
         </StepShell>
       )}
 
@@ -222,7 +229,6 @@ export default function Onboarding({ newSemesterMode }: { newSemesterMode: boole
             kind="class"
             courseCodes={drafts.filter(validDraft).map((d) => d.code.toUpperCase())}
             onCodesFound={async (codes) => {
-              // Extracted codes directly populate/sync the course list.
               for (const code of codes) {
                 const known = drafts.some((d) => d.code.toUpperCase() === code);
                 if (!known) {
@@ -231,7 +237,6 @@ export default function Onboarding({ newSemesterMode }: { newSemesterMode: boole
               }
             }}
             onSave={async (rows: ReviewRow[]) => {
-              // Ensure codes exist as courses, then save slots.
               for (const r of rows) {
                 const code = r.course_code.toUpperCase();
                 if (!code) continue;
@@ -324,7 +329,6 @@ export default function Onboarding({ newSemesterMode }: { newSemesterMode: boole
 
   async function advance() {
     if (step === 2) {
-      // Persist the course drafts (and their CA components) before the timetable step.
       const saved: Course[] = [];
       for (const d of drafts.filter(validDraft)) {
         const ca = d.course_type === "general"
