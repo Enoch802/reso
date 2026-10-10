@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
-  BookOpenCheck, Wallet2, Repeat2, ArrowRight, Mail, MoonStar, AlarmClock, TrendingUp, ReceiptText, Hourglass,
+  BookOpenCheck, Wallet2, Repeat2, ArrowRight, MoonStar, AlarmClock, TrendingUp, ReceiptText, Hourglass,
 } from "lucide-react";
 import { db } from "@/lib/db";
 import { GlassCard, SectionHeader, NeoButton } from "@/components/ui";
@@ -30,10 +30,6 @@ export default function DashboardPage() {
   const courses = useLiveQuery(() => db.courses.toArray(), []);
   const exams = useLiveQuery(() => db.exams.toArray(), []);
   const financeWeeks = useLiveQuery(() => db.finance_weeks.toArray(), []);
-  const emailItems = useLiveQuery(
-    () => db.email_items.where("fetched_date").equals(today).toArray(),
-    [today]
-  );
   const weekScores = useLiveQuery(() => db.discipline_scores.toArray(), []);
   const expensesAll = useLiveQuery(() => db.expenses.toArray(), []);
   const dailyLogs = useLiveQuery(() => db.daily_logs.toArray(), []);
@@ -118,10 +114,6 @@ export default function DashboardPage() {
       (routineLogs ?? []).some((l) => l.routine_id === r.id && l.status === "done")
     );
   }, [routinesToday, routineLogs]);
-
-  const important = useMemo(() => {
-    return (emailItems ?? []).filter((e) => e.rank === "important");
-  }, [emailItems]);
 
   const reflected = useMemo(() => {
     return (dailyLog ?? []).some((l) => l.evening_reflection_text?.trim());
@@ -217,35 +209,6 @@ export default function DashboardPage() {
       {hour >= 21 && (expenses ?? []).length === 0 && (
         <SpendCheckIn today={today} />
       )}
-
-      {/* Email strip */}
-      <div className="animate-fade-up [animation-delay:340ms]">
-        <Link href="/inbox" className="focus-ring block">
-          <GlassCard className="p-5 hover:-translate-y-0.5 transition-transform">
-            <div className="flex items-center gap-4">
-              <span className="neo-sm w-11 h-11 rounded-xl flex items-center justify-center text-[var(--accent)]" aria-hidden><Mail size={19} /></span>
-              <div className="flex-1 min-w-0">
-                {emailItems == null ? (
-                  <p className="text-sm text-[var(--ink-soft)]">…</p>
-                ) : emailItems.length === 0 ? (
-                  <>
-                    <p className="font-semibold text-[var(--ink)]">Your inbox, triaged</p>
-                    <p className="text-sm text-[var(--ink-soft)]">Optional — connect Gmail in Settings.</p>
-                  </>
-                ) : (
-                  <>
-                    <p className="font-semibold text-[var(--ink)]">{important.length} need${important.length === 1 ? "s" : ""} your attention today</p>
-                    <p className="text-sm text-[var(--ink-soft)] truncate">
-                      {important[0] ? `${important[0].summary || important[0].subject}` : "nothing urgent"}
-                    </p>
-                  </>
-                )}
-              </div>
-              <ArrowRight size={18} className="text-[var(--ink-faint)]" aria-hidden />
-            </div>
-          </GlassCard>
-        </Link>
-      </div>
 
       {/* Evening reflection prompt */}
       {!reflected && hour >= 17 && (
