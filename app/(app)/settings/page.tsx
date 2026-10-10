@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
   UserRound, CalendarRange, BookOpenCheck, CalendarClock, CalendarDays, CalendarCheck2, AlarmClock, NotebookPen,
-  Wallet2, Repeat2, Mail, Palette, Database, ChevronRight, ChevronDown, Bell, Download, Award, Trash2, Hourglass,
+  Wallet2, Repeat2, Palette, Database, ChevronRight, ChevronDown, Bell, Download, Award, Trash2, Hourglass,
 } from "lucide-react";
 import { db, exportAllData, getScreenTimeEnabled, setScreenTimeEnabled, getMeta, setMeta } from "@/lib/db";
 import { loadSampleData, clearSampleData } from "@/lib/seed";
@@ -12,12 +12,10 @@ import TimetableUpload, { ReviewRow, dayToNum } from "@/components/TimetableUplo
 import Recap from "@/components/Recap";
 import { ExamEditor } from "@/components/academics-exam";
 import { fmtMoney } from "@/lib/dates";
-import { googleConfigured, requestGmailAccess } from "@/lib/google";
 import { syncNativeAlarms, scheduleNativeIfRunning } from "@/lib/alarm";
 import { Capacitor } from "@capacitor/core";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
-import { fetchRankedEmails } from "@/lib/ai";
 import { screenTimeAvailable, screenTimePermission, openScreenTimeSettings, pullYesterdayScreenTime } from "@/lib/screentime";
 import ImportData from "@/components/ImportData";
 import { notificationPermissionState, ensureNotificationPermission } from "@/lib/notify";
@@ -32,7 +30,6 @@ export default function SettingsPage() {
   const exams = useLiveQuery(() => db.exams.toArray(), []);
   const routines = useLiveQuery(() => db.routines.toArray(), []);
   const fs = useLiveQuery(() => db.finance_settings.toArray(), []);
-  const emailAccounts = useLiveQuery(() => db.email_accounts.toArray(), []);
   const archived = useLiveQuery(() => db.archived_semesters.toArray(), []);
   const studySlots = useLiveQuery(() => db.personal_study_slots.toArray(), []);
   const slots = useLiveQuery(() => db.timetable_slots.toArray(), []);
@@ -49,7 +46,6 @@ export default function SettingsPage() {
     { id: "studytt", icon: <NotebookPen size={17} />, label: "Personal study timetable" },
     { id: "finance", icon: <Wallet2 size={17} />, label: "Finance" },
     { id: "routines", icon: <Repeat2 size={17} />, label: "Routines" },
-    { id: "email", icon: <Mail size={17} />, label: "Email" },
     { id: "screentime", icon: <Hourglass size={17} />, label: "Screen time tracking" },
     { id: "reminders", icon: <Bell size={17} />, label: "Reminders" },
     { id: "alarms", icon: <AlarmClock size={17} />, label: "Alarms" },
@@ -95,7 +91,6 @@ export default function SettingsPage() {
       <StudyTTModal open={openCard === "studytt"} onClose={() => setOpenCard(null)} />
       <FinanceModal open={openCard === "finance"} onClose={() => setOpenCard(null)} />
       <RoutinesModal open={openCard === "routines"} onClose={() => setOpenCard(null)} />
-      <EmailModal open={openCard === "email"} onClose={() => setOpenCard(null)} />
       <ScreenTimeModal open={openCard === "screentime"} onClose={() => setOpenCard(null)} />
       <RemindersModal open={openCard === "reminders"} onClose={() => setOpenCard(null)} />
       <AlarmsModal open={openCard === "alarms"} onClose={() => setOpenCard(null)} />
@@ -383,89 +378,6 @@ function RoutinesModal({ open, onClose }: { open: boolean; onClose: () => void }
           </div>
         ))}
       </div>
-    </Modal>
-  );
-}
-
-function EmailModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const accounts = useLiveQuery(() => db.email_accounts.toArray(), [open]);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  const connect = async () => {
-    setBusy(true); setErr(null);
-    try {
-      const { accessToken, refreshToken, expiresAt } = await requestGmailAccess();
-      const me = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      }).then((r) => (r.ok ? r.json() : null));
-      const email = me?.emailAddress ?? "gmail account";
-      if (accounts?.some((a) => a.email === email) || accounts?.length) {
-        if (!accounts?.some((a) => a.email === email)) {
-          if ((accounts?.length ?? 0) >= 4) { setErr("Four accounts is the limit — remove one first."); return; }
-        }
-        const existing = accounts?.find((a) => a.email === email);
-        if (existing) await db.email_accounts.update(existing.id!, { access_token: accessToken, refresh_token: refreshToken, token_expires_at: expiresAt });
-        else await db.email_accounts.add({ provider: "gmail", email, access_token: accessToken, refresh_token: refreshToken, token_expires_at: expiresAt, last_fetched_at: null });
-      } else {
-        await db.email_accounts.add({ provider: "gmail", email, access_token: accessToken, refresh_token: refreshToken, token_expires_at: expiresAt, last_fetched_at: null });
-      }
-    } catch {
-      setErr("Google couldn't complete the connection. Nothing was stored.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal open={open} onClose={onClose} title="Email" wide>
-      <p className="text-sm text-[var(--ink-soft)] mb-4">
-        Connect up to 4 Gmail accounts, read-only. Everything stays on this device.
-      </p>
-      {!googleConfigured() && (
-        <p className="text-xs text-amber-600 dark:text-amber-300 mb-4">
-          Email connection isn&apos;t set up on this install yet.
-        </p>
-      )}
-      <div className="space-y-2.5 mb-4">
-        {(accounts ?? []).map((a) => (
-          <div key={a.id} className="rounded-2xl neo p-4 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-[var(--ink)] truncate">{a.email}</p>
-              <p className="text-xs text-[var(--ink-faint)]">read-only · stored on this device</p>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <NeoButton onClick={async () => {
-                try {
-                  const { items, accessToken, expiresAt } = await fetchRankedEmails(a);
-                  if (accessToken && expiresAt) await db.email_accounts.update(a.id!, { access_token: accessToken, token_expires_at: expiresAt });
-                  const today = new Date().toISOString().slice(0, 10);
-                  if (items.length) {
-                    await db.email_items.bulkAdd(items.map((it) => ({
-                      email_account_id: a.id!, subject: it.subject, sender: it.sender,
-                      snippet: it.snippet, summary: it.summary, rank: it.rank, fetched_date: today,
-                    })));
-                    await db.email_accounts.update(a.id!, { last_fetched_at: Date.now() });
-                  }
-                } catch { setErr("That account needs reconnecting."); }
-              }}>Refresh</NeoButton>
-              <button
-                aria-label={`Remove ${a.email}`}
-                onClick={async () => { await db.email_accounts.delete(a.id!); await db.email_items.where("email_account_id").equals(a.id!).delete(); }}
-                className="focus-ring text-[var(--ink-faint)] hover:text-rose-500 p-2"
-              >
-                <Trash2 size={15} aria-hidden />
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-      {err && <p className="text-sm text-amber-600 dark:text-amber-300 mb-3">{err}</p>}
-      {(accounts?.length ?? 0) < 4 && (
-        <NeoButton variant="accent" onClick={connect} disabled={busy || !googleConfigured()} className="font-semibold">
-          {busy ? "Opening Google…" : "Connect a Gmail account"}
-        </NeoButton>
-      )}
     </Modal>
   );
 }
