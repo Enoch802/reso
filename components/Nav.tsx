@@ -13,7 +13,6 @@ const LINKS = [
   { href: "/journal", label: "Journal", icon: NotebookPen },
   { href: "/routines", label: "Routines", icon: Repeat2 },
   { href: "/digest", label: "Digest", icon: ScrollText },
-  { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
