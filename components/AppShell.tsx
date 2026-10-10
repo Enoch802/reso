@@ -5,7 +5,6 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, getMeta, setMeta, migrateTopicStatuses, DailyPlanItem, Exam, TimetableSlot, FinanceSettings, FinanceWeek } from "@/lib/db";
 import { todayStr, yesterdayStr, addDays, daysBetween, weekStartOnOrBefore, fmtMoney } from "@/lib/dates";
 import { Modal, NeoCheck, NeoButton, Field } from "./ui";
-import { fetchRankedEmails } from "@/lib/ai";
 import { pullYesterdayScreenTime, screenTimeAvailable, screenTimePermission } from "@/lib/screentime";
 import { getScreenTimeEnabled, setScreenTimeEnabled } from "@/lib/db";
 import { BellRing } from "lucide-react";
@@ -376,30 +375,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       }
     })();
   }, [fs, today]);
-
-  // Daily email refresh on open.
-  useEffect(() => {
-    (async () => {
-      const lastFetch = await getMeta("email_last_fetch_date");
-      if (lastFetch === today) return;
-      const accounts = await db.email_accounts.toArray();
-      if (!accounts.length) return;
-      await setMeta("email_last_fetch_date", today);
-      for (const acc of accounts) {
-        try {
-          const { items, accessToken, expiresAt } = await fetchRankedEmails(acc);
-          if (accessToken && expiresAt) await db.email_accounts.update(acc.id!, { access_token: accessToken, token_expires_at: expiresAt });
-          if (items.length) {
-            await db.email_items.bulkAdd(items.map((it) => ({
-              email_account_id: acc.id!, subject: it.subject, sender: it.sender,
-              snippet: it.snippet, summary: it.summary, rank: it.rank, fetched_date: today,
-            })));
-            await db.email_accounts.update(acc.id!, { last_fetched_at: Date.now() });
-          }
-        } catch { /* quiet — inbox shows the calm reconnect note */ }
-      }
-    })();
-  }, [today]);
 
   // Screen time sync on app open — conditional on enabled state.
   useEffect(() => {
