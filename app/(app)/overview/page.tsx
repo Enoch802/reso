@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
   TrendingUp, Wallet2, Repeat2, BookOpenCheck, AlarmClock, ListChecks, ArrowRight,
-  ReceiptText, ScrollText, Clock3, Hourglass,
+  ReceiptText, Clock3, Hourglass,
 } from "lucide-react";
 import { db } from "@/lib/db";
 import { GlassCard, SectionHeader, Tag, ProportionBar, NeoButton, Field, Modal } from "@/components/ui";
@@ -13,20 +13,14 @@ import Checklist from "@/components/Checklist";
 import { useToday } from "@/components/AppShell";
 import {
   academicScore, financeScore, routineScore, isSickDay, daysUntilExam, examCountdownText, routineStreak,
-  screenTimeScore, screenTimeStreak,
+  screenTimeScore,
 } from "@/lib/calc";
 import { screenTimeAvailable } from "@/lib/screentime";
 import { fmtMoney, longDate, prettyDate, weekStartOnOrBefore, addDays, daysBetween, DAY_NAMES, DAY_SHORT } from "@/lib/dates";
 
-function fmtDur(min: number): string {
-  const h = Math.floor(min / 60);
-  const m = Math.round(min % 60);
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
-}
-
 /**
  * Overview — the one deliberately rich screen: ring, daily measures, checklist,
- * money, reminders, digest highlight, and topic coverage, all live.
+ * money, reminders, and topic coverage, all live.
  */
 export default function OverviewPage() {
   const today = useToday();
@@ -48,10 +42,6 @@ export default function OverviewPage() {
   const logs = useLiveQuery(() => db.routine_logs.toArray(), []);
   const dailyLog = useLiveQuery(() => db.daily_logs.where("date").equals(today).toArray(), [today]);
   const weekScores = useLiveQuery(() => db.discipline_scores.toArray(), []);
-  const digests = useLiveQuery(async () => {
-    const all = await db.weekly_digests.toArray();
-    return all.sort((a, b) => b.created_at - a.created_at).slice(0, 1);
-  }, []);
   const dailyLogs = useLiveQuery(() => db.daily_logs.toArray(), []);
   const tracking = useLiveQuery(() => db.screentime_tracking.get(0), []);
 
@@ -150,9 +140,6 @@ export default function OverviewPage() {
   const semesterDay = p ? Math.max(0, daysBetween(p.semester_start_date, today) + 1) : 0;
   const semesterLen = p ? Math.max(1, daysBetween(p.semester_start_date, p.semester_end_date) + 1) : 1;
   const semesterPct = Math.min(100, Math.round((semesterDay / semesterLen) * 100));
-
-  const latestDigest = digests?.[0];
-  const digestPreview = latestDigest?.digest_text.split("\n").filter(Boolean).slice(0, 2).join(" ") ?? "";
 
   const routinesToday = useMemo(() => {
     return (routines ?? []).filter((r) => r.schedule_days.includes(dow));
@@ -290,23 +277,6 @@ export default function OverviewPage() {
           {hour >= 21 && (expenses ?? []).length === 0 && <SpendCheckIn today={today} weekId={week?.id} />}
         </div>
       </div>
-
-      {/* Digest highlight */}
-      {latestDigest && (
-        <Link href="/digest" className="focus-ring block animate-fade-up [animation-delay:280ms]">
-          <div className="letter-card rounded-3xl p-6 hover:-translate-y-0.5 transition-transform">
-            <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--ink-faint)] flex items-center gap-2 mb-2">
-              <ScrollText size={13} aria-hidden /> From your latest weekly letter
-            </p>
-            <p className="font-serif text-[16px] leading-relaxed line-clamp-2" style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-              {digestPreview}
-            </p>
-            <span className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-[var(--ink-soft)]">
-              Read the full letter <ArrowRight size={14} aria-hidden />
-            </span>
-          </div>
-        </Link>
-      )}
 
       {/* Topic coverage + week strip */}
       <div className="grid md:grid-cols-2 gap-5 animate-fade-up [animation-delay:340ms]">
